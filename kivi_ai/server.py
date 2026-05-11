@@ -65,11 +65,13 @@ def _register_providers():
         api_key=os.environ.get("OPENAI_API_KEY", ""),
     ))
 
+    VLLM_MODEL = os.environ.get("VLLM_MODEL", "default")
+
     # vLLM (OpenAI-compatible local)
     Registry.register_provider("vllm", OpenAIProvider(
         api_key="sk-xxx",
         base_url=f"{VLLM_URL}/v1",
-        default_model="/home/ng6355/models/qwen3-6-27b",
+        default_model=VLLM_MODEL,
         provider_label="vllm",
     ))
 

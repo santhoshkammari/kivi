@@ -35,7 +35,6 @@ CONTEXT_WINDOWS: dict[str, int] = {
     "claude-sonnet-4": 200_000,
     # Local / vLLM
     "qwen3-27b": 250_000,
-    "/home/ng6355/models/qwen3-6-27b": 250_000,
 }
 
 # ── Cost per 1M tokens (input, output) ───────────────────────────────
