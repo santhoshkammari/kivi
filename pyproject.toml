@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kivi-ai"
+version = "0.1.0"
+description = "Kivi — Unified AI chat interface. Provider-agnostic streaming chat with tools, sessions, auto-compaction. Supports OpenAI, vLLM, GitHub Copilot SDK, Claude Agent SDK."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Santhosh Kammari", email = "santhoshkammari1999@gmail.com" }]
+keywords = ["ai", "llm", "chat", "copilot", "claude", "openai", "vllm", "streaming", "unified", "agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.20",
+    "openai>=1.0",
+    "httpx>=0.24",
+    "aiofiles>=23.0",
+]
+
+[project.optional-dependencies]
+copilot = ["github-copilot-sdk>=0.1"]
+claude = ["claude-agent-sdk>=0.1"]
+all = [
+    "github-copilot-sdk>=0.1",
+    "claude-agent-sdk>=0.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/santhoshkammari/kivi"
+Repository = "https://github.com/santhoshkammari/kivi"
+Issues = "https://github.com/santhoshkammari/kivi/issues"
+
+[project.scripts]
+kivi = "kivi_ai.cli:run"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["kivi_ai*"]
+
+[tool.setuptools.package-data]
+kivi_ai = ["frontend/*.html"]
