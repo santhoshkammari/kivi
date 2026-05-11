@@ -841,7 +841,7 @@
               </button>
               <input type="file" id="welcomeFileInput" multiple accept="image/*,.txt,.py,.js,.ts,.json,.md,.csv,.html,.css,.xml,.yaml,.yml,.toml,.sh,.rs,.go,.java,.c,.cpp,.h,.rb,.php,.sql" hidden>
               <div class="mode-toggle">
-                <button class="mode-btn active" data-mode="vllm" onclick="setMode('vllm')">vLLM</button>
+                <button class="mode-btn active" data-mode="chat" onclick="setMode('chat')">Chat</button>
                 <button class="mode-btn" data-mode="kivi" onclick="setMode('kivi')">Kivi</button>
                 <button class="mode-btn" data-mode="copilot" onclick="setMode('copilot')">Copilot</button>
                 <button class="mode-btn" data-mode="qwen-copilot" onclick="setMode('qwen-copilot')">QCopilot</button>
@@ -1019,7 +1019,7 @@
             </button>
             <input type="file" id="chatFileInput" multiple accept="image/*,.txt,.py,.js,.ts,.json,.md,.csv,.html,.css,.xml,.yaml,.yml,.toml,.sh,.rs,.go,.java,.c,.cpp,.h,.rb,.php,.sql" hidden>
             <div class="mode-toggle">
-              <button class="mode-btn active" data-mode="vllm" onclick="setMode('vllm')">vLLM</button>
+              <button class="mode-btn active" data-mode="chat" onclick="setMode('chat')">Chat</button>
               <button class="mode-btn" data-mode="kivi" onclick="setMode('kivi')">Kivi</button>
               <button class="mode-btn" data-mode="copilot" onclick="setMode('copilot')">Copilot</button>
               <button class="mode-btn" data-mode="qwen-copilot" onclick="setMode('qwen-copilot')">QCopilot</button>
@@ -1098,7 +1098,6 @@ const SAMPLING_MODES = {
 const TOOL_ICONS = { bash:'\u2318', read:'\uD83D\uDCC4', write:'\u270D\uFE0F', edit:'\u2702\uFE0F', glob:'\uD83D\uDD0D', grep:'\uD83D\uDD0E', web_search:'\uD83C\uDF10', web_fetch:'\uD83C\uDF10', default:'\uD83D\uDD27' };
 
 const SYSTEM_PROMPTS = {
-  vllm: 'You are Kivi, a helpful AI assistant. Be concise, helpful, and friendly. Format responses in markdown when helpful.',
   chat: 'You are Kivi, a helpful AI assistant. Be concise, helpful, and friendly. Format responses in markdown when helpful.',
   kivi: 'You are Kivi, an AI coding agent with access to tools. You MUST use your tools to help the user — NEVER say you cannot do something when you have a tool for it. For web requests, use web_search or web_fetch. For file operations, use read/write/edit/glob/grep. For shell commands, use bash. Always use tools proactively. Plan first, then execute step by step.',
   copilot: 'You are a helpful AI assistant powered by GitHub Copilot. Be concise, helpful, and friendly. Format responses in markdown when helpful.',
@@ -1109,16 +1108,16 @@ const SYSTEM_PROMPTS = {
 
 // Provider → mode mapping (for display)
 const MODE_TO_PROVIDER = {
-  vllm: 'vllm', chat: 'vllm', kivi: 'vllm', copilot: 'copilot',
+  chat: 'vllm', kivi: 'vllm', copilot: 'copilot',
   'qwen-copilot': 'qwen-copilot', claude: 'claude', 'qwen-claude': 'qwen-claude',
 };
 const MODE_COLORS = {
-  vllm:'#7aaeE0', chat:'#7aaeE0', kivi:'#e0a07a', copilot:'#3fb950',
+  chat:'#7aaeE0', kivi:'#e0a07a', copilot:'#3fb950',
   'qwen-copilot':'#d29922', claude:'#c49cde', 'qwen-claude':'#d97706',
   openai:'#10a37f',
 };
 const MODE_LABELS = {
-  vllm:'vLLM', chat:'vLLM', kivi:'Kivi', copilot:'Copilot',
+  chat:'Chat', kivi:'Kivi', copilot:'Copilot',
   'qwen-copilot':'QCopilot', claude:'Claude', 'qwen-claude':'QClaude',
   openai:'OpenAI',
 };
@@ -1132,7 +1131,7 @@ let abortController = null;
 let stopRequested = false;
 const _chatStreaming = {};
 const _chatDomCache = {};
-let currentMode = 'vllm';
+let currentMode = 'chat';
 let currentSamplingMode = 'instruct_general';
 let currentTheme = 'dark';
 let uploadedFiles = { welcome: [], chat: [] };
@@ -1270,7 +1269,6 @@ async function setMode(mode) {
   localStorage.setItem('unified_mode', mode);
   document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   const placeholders = {
-    vllm: ['How can I help you today?', 'Reply to Kivi...'],
     chat: ['How can I help you today?', 'Reply to Kivi...'],
     kivi: ['Ask Kivi to help with code...', 'Ask Kivi...'],
     copilot: ['Ask Copilot anything...', 'Ask Copilot...'],
@@ -1278,7 +1276,7 @@ async function setMode(mode) {
     claude: ['Ask Claude anything...', 'Ask Claude...'],
     'qwen-claude': ['Ask QClaude anything...', 'Ask QClaude...'],
   };
-  const [ph, phChat] = placeholders[mode] || placeholders.vllm;
+  const [ph, phChat] = placeholders[mode] || placeholders.chat;
   document.getElementById('welcomeInput').placeholder = ph;
   document.getElementById('chatInput').placeholder = phChat;
   await updateModelSelectors();
@@ -1322,7 +1320,7 @@ async function updateModelSelectors() {
                         models.find(m => m.id === 'haiku') ||
                         models[0];
       if (preferred) currentModelId = preferred.id;
-    } else if (currentMode === 'vllm' || currentMode === 'chat' || currentMode === 'kivi') {
+    } else if (currentMode === 'chat' || currentMode === 'kivi') {
       sel.innerHTML = '<option value="default">Default Model</option>';
       currentModelId = 'default';
     } else if (currentMode === 'copilot' || currentMode === 'qwen-copilot') {
@@ -1535,8 +1533,8 @@ async function switchToChat(id) {
 
   // Set mode/model from session
   if (session) {
-    const providerToMode = { vllm: 'vllm', copilot: 'copilot', 'qwen-copilot': 'qwen-copilot', claude: 'claude', 'qwen-claude': 'qwen-claude' };
-    const mode = providerToMode[session.provider] || session.mode || 'vllm';
+    const providerToMode = { vllm: 'chat', copilot: 'copilot', 'qwen-copilot': 'qwen-copilot', claude: 'claude', 'qwen-claude': 'qwen-claude' };
+    const mode = providerToMode[session.provider] || session.mode || 'chat';
     if (session.model) currentModelId = session.model;
     if (mode !== currentMode) {
       await setMode(mode);
@@ -2863,7 +2861,7 @@ async function init() {
   const savedMode = localStorage.getItem('unified_mode');
   const savedSampling = localStorage.getItem('unified_sampling');
   if (savedTheme) currentTheme = savedTheme;
-  if (savedMode) currentMode = savedMode === 'chat' ? 'vllm' : savedMode;
+  if (savedMode) currentMode = savedMode;
   if (savedSampling) currentSamplingMode = savedSampling;
 
   setTheme(currentTheme);
