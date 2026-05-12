@@ -1132,7 +1132,7 @@ let stopRequested = false;
 const _chatStreaming = {};
 const _chatDomCache = {};
 let currentMode = 'chat';
-let currentSamplingMode = 'instruct_general';
+let currentSamplingMode = 'thinking_general';
 let currentTheme = 'dark';
 let uploadedFiles = { welcome: [], chat: [] };
 let currentModelId = 'default';
@@ -1761,6 +1761,11 @@ async function streamUnified() {
       messages: apiMessages,
       system_prompt: SYSTEM_PROMPTS[currentMode],
       temperature: sampling.temperature,
+      top_p: sampling.top_p,
+      top_k: sampling.top_k,
+      presence_penalty: sampling.presence_penalty,
+      repetition_penalty: sampling.repetition_penalty,
+      enable_thinking: sampling.thinking,
       enable_tools: TOOL_MODES.has(currentMode),
     };
     if (streamSessionId && !streamSessionId.startsWith('temp-')) {

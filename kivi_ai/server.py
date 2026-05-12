@@ -110,6 +110,11 @@ async def chat_stream(request: Request):
     raw_messages = data.get("messages", [])
     system_prompt = data.get("system_prompt")
     temperature = data.get("temperature")
+    top_p = data.get("top_p")
+    top_k = data.get("top_k")
+    presence_penalty = data.get("presence_penalty")
+    repetition_penalty = data.get("repetition_penalty")
+    enable_thinking = data.get("enable_thinking", True)
 
     try:
         provider = Registry.get_provider(provider_name)
@@ -195,6 +200,11 @@ async def chat_stream(request: Request):
                     tools=tool_schemas,
                     system_prompt=system_prompt,
                     temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    presence_penalty=presence_penalty,
+                    repetition_penalty=repetition_penalty,
+                    enable_thinking=enable_thinking,
                     use_vllm=use_vllm,
                 )
                 async for chunk in normalize_stream(raw_stream):

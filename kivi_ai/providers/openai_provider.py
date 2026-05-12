@@ -64,6 +64,11 @@ class OpenAIProvider(BaseProvider):
         system_prompt: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        presence_penalty: float | None = None,
+        repetition_penalty: float | None = None,
+        enable_thinking: bool = True,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         client = self._get_client()
@@ -89,6 +94,20 @@ class OpenAIProvider(BaseProvider):
         }
         if temperature is not None:
             req["temperature"] = temperature
+        if top_p is not None:
+            req["top_p"] = top_p
+        if top_k is not None:
+            req["extra_body"] = req.get("extra_body", {})
+            req["extra_body"]["top_k"] = top_k
+        if presence_penalty is not None:
+            req["presence_penalty"] = presence_penalty
+        if repetition_penalty is not None:
+            req["extra_body"] = req.get("extra_body", {})
+            req["extra_body"]["repetition_penalty"] = repetition_penalty
+        if not enable_thinking:
+            # For qwen3 models: disable thinking via chat_template_kwargs
+            req["extra_body"] = req.get("extra_body", {})
+            req["extra_body"]["chat_template_kwargs"] = {"enable_thinking": False}
         if max_tokens:
             req["max_tokens"] = max_tokens
         if tools:
