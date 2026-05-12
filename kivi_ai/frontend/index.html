@@ -1294,7 +1294,13 @@ async function loadModelsForProvider(provider) {
   try {
     const resp = await fetch('/api/models/' + encodeURIComponent(provider));
     const models = await resp.json();
-    if (Array.isArray(models)) {
+    if (Array.isArray(models) && models.length > 0) {
+      // Ensure friendly display name (last path component)
+      for (const m of models) {
+        if (!m.name || m.name === m.id) {
+          m.name = m.id.includes('/') ? m.id.split('/').pop() : m.id;
+        }
+      }
       _providerModels[provider] = models;
       return models;
     }
@@ -1312,23 +1318,11 @@ async function updateModelSelectors() {
       for (const m of models) {
         const opt = document.createElement('option');
         opt.value = m.id;
-        opt.textContent = m.name || m.id;
+        opt.textContent = m.name || (m.id.includes('/') ? m.id.split('/').pop() : m.id);
         sel.appendChild(opt);
       }
-      const preferred = models.find(m => m.id === currentModelId) ||
-                        models.find(m => m.id === 'gpt-4.1') ||
-                        models.find(m => m.id === 'haiku') ||
-                        models[0];
+      const preferred = models.find(m => m.id === currentModelId) || models[0];
       if (preferred) currentModelId = preferred.id;
-    } else if (currentMode === 'chat' || currentMode === 'kivi') {
-      sel.innerHTML = '<option value="default">Default Model</option>';
-      currentModelId = 'default';
-    } else if (currentMode === 'copilot' || currentMode === 'qwen-copilot') {
-      sel.innerHTML = '<option value="gpt-4.1">GPT-4.1</option>';
-      currentModelId = 'gpt-4.1';
-    } else if (currentMode === 'claude' || currentMode === 'qwen-claude') {
-      sel.innerHTML = '<option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option>';
-      currentModelId = 'haiku';
     } else {
       sel.innerHTML = '<option value="default">Default Model</option>';
       currentModelId = 'default';

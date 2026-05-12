@@ -68,6 +68,14 @@ class OpenAIProvider(BaseProvider):
     ) -> AsyncIterator[StreamChunk]:
         client = self._get_client()
         model = model or self._default_model
+        # Auto-detect model if set to "default"
+        if model == "default":
+            try:
+                available = await self.list_models()
+                if available:
+                    model = available[0].id
+            except Exception:
+                pass
 
         # Build OpenAI messages
         oai_messages = self._to_openai_messages(messages, system_prompt)
