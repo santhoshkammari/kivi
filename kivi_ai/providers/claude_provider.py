@@ -59,7 +59,7 @@ class ClaudeProvider(BaseProvider):
             from claude_agent_sdk import (
                 ClaudeSDKClient, ClaudeAgentOptions, StreamEvent,
                 AssistantMessage, ResultMessage, TextBlock, ThinkingBlock,
-                ToolUseBlock, ToolResultBlock,
+                ToolUseBlock, ToolResultBlock, UserMessage,
             )
             try:
                 from claude_agent_sdk import ServerToolUseBlock, ServerToolResultBlock
@@ -69,7 +69,7 @@ class ClaudeProvider(BaseProvider):
             opts: dict[str, Any] = {
                 "model": model,
                 "permission_mode": "bypassPermissions",
-                "max_turns": 1,
+                "max_turns": 10,
                 "include_partial_messages": True,
             }
 
@@ -175,6 +175,25 @@ class ClaudeProvider(BaseProvider):
                                     "is_error": False,
                                 },
                             )
+
+                elif isinstance(msg, UserMessage):
+                    # Tool results from the Claude CLI's internal execution
+                    if hasattr(msg, 'content') and isinstance(msg.content, list):
+                        for block in msg.content:
+                            if isinstance(block, ToolResultBlock):
+                                rc = block.content
+                                if isinstance(rc, list):
+                                    rc = "\n".join(
+                                        p.get("text", str(p)) for p in rc if isinstance(p, dict)
+                                    )
+                                yield StreamChunk(
+                                    type=ChunkType.TOOL_COMPLETE,
+                                    metadata={
+                                        "tool_call_id": block.tool_use_id,
+                                        "result": rc or "",
+                                        "is_error": getattr(block, 'is_error', False) or False,
+                                    },
+                                )
 
                 elif isinstance(msg, ResultMessage):
                     total_cost = msg.total_cost_usd or 0.0
