@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, Fil
 from starlette.middleware.cors import CORSMiddleware
 
 from .core.registry import Registry
-from .core.types import ChunkType, Message, ProviderType, Role, StreamChunk
+from .core.types import ChunkType, Message, ProviderType, Role, StreamChunk, ToolCall, ToolResult
 from .providers.config import DEFAULT_MODELS, estimate_cost
 from .sessions.compaction import check_and_compact
 from .sessions.manager import SessionManager
@@ -155,6 +155,14 @@ async def chat_stream(request: Request):
     # Check compaction before streaming
     use_vllm = provider_name.startswith("qwen-")
 
+    # Check if tools should be enabled (frontend sends enable_tools flag or mode implies it)
+    enable_tools = data.get("enable_tools", True)  # default on — let the model decide
+    tool_schemas = None
+    if enable_tools and provider.supports_tools:
+        tools_list = Registry.list_tools()
+        if tools_list:
+            tool_schemas = [t.schema for t in tools_list]
+
     async def generate():
         # Compaction check
         compaction_chunk = await check_and_compact(session_id, mgr, provider, model)
@@ -169,30 +177,93 @@ async def chat_stream(request: Request):
         # Emit session_id for the frontend
         yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
 
-        # Stream from provider
+        # Tool execution loop — keeps going until model produces text (no tool calls)
+        MAX_TOOL_ROUNDS = 10
+        current_messages = list(messages_to_send)
         full_content = ""
         full_thinking = ""
         stream_meta: dict[str, Any] = {}
 
-        try:
-            raw_stream = provider.stream(
-                messages_to_send, model,
-                system_prompt=system_prompt,
-                temperature=temperature,
-                use_vllm=use_vllm,
+        for tool_round in range(MAX_TOOL_ROUNDS):
+            round_content = ""
+            round_thinking = ""
+            round_tool_calls: list[dict] = []
+
+            try:
+                raw_stream = provider.stream(
+                    current_messages, model,
+                    tools=tool_schemas,
+                    system_prompt=system_prompt,
+                    temperature=temperature,
+                    use_vllm=use_vllm,
+                )
+                async for chunk in normalize_stream(raw_stream):
+                    if chunk.type == ChunkType.DELTA:
+                        round_content += chunk.content
+                    elif chunk.type == ChunkType.THINKING_DELTA:
+                        round_thinking += chunk.content
+                    elif chunk.type == ChunkType.DONE:
+                        stream_meta = chunk.metadata
+                        round_tool_calls = stream_meta.get("tool_calls", [])
+                    yield f"data: {json.dumps(chunk.to_sse_dict())}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            full_content += round_content
+            full_thinking += round_thinking
+
+            # If no tool calls, we're done
+            if not round_tool_calls:
+                break
+
+            # Execute each tool call
+            # First, add assistant message with tool calls to context
+            assistant_tc_msg = Message(
+                role=Role.ASSISTANT,
+                content=round_content,
+                tool_calls=[
+                    ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
+                    for tc in round_tool_calls
+                ],
             )
-            async for chunk in normalize_stream(raw_stream):
-                if chunk.type == ChunkType.DELTA:
-                    full_content += chunk.content
-                elif chunk.type == ChunkType.THINKING_DELTA:
-                    full_thinking += chunk.content
-                elif chunk.type == ChunkType.DONE:
-                    stream_meta = chunk.metadata
-                yield f"data: {json.dumps(chunk.to_sse_dict())}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
-            yield "data: [DONE]\n\n"
-            return
+            current_messages.append(assistant_tc_msg)
+
+            tool_results_for_msg: list[ToolResult] = []
+            for tc in round_tool_calls:
+                tool_name = tc["name"]
+                tool_args = tc["arguments"]
+                tool_call_id = tc["id"]
+
+                # Execute the tool
+                try:
+                    tool_impl = Registry.get_tool(tool_name)
+                    result = await tool_impl.execute(tool_args, work_dir=WORK_DIR)
+
+                    # Emit tool_complete event
+                    yield f"data: {json.dumps({'type': 'tool_complete', 'tool_call_id': tool_call_id, 'name': tool_name, 'result': result.output, 'is_error': result.is_error})}\n\n"
+
+                    tool_results_for_msg.append(ToolResult(
+                        tool_call_id=tool_call_id,
+                        content=result.output,
+                        is_error=result.is_error,
+                    ))
+                except Exception as e:
+                    error_msg = f"Tool '{tool_name}' failed: {str(e)}"
+                    yield f"data: {json.dumps({'type': 'tool_complete', 'tool_call_id': tool_call_id, 'name': tool_name, 'result': error_msg, 'is_error': True})}\n\n"
+                    tool_results_for_msg.append(ToolResult(
+                        tool_call_id=tool_call_id,
+                        content=error_msg,
+                        is_error=True,
+                    ))
+
+            # Add tool results as a message for next round
+            current_messages.append(Message(
+                role=Role.TOOL,
+                content="",
+                tool_results=tool_results_for_msg,
+            ))
 
         # Store assistant response
         if full_content or full_thinking:
@@ -214,7 +285,11 @@ async def chat_stream(request: Request):
         cost = stream_meta.get("cost_usd", estimate_cost(model, input_tokens, output_tokens))
         await mgr.log_usage(session_id, model, input_tokens, output_tokens, cost)
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── Session API ──────────────────────────────────────────────────────

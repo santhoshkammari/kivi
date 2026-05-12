@@ -1753,12 +1753,15 @@ async function streamUnified() {
   const sampling = SAMPLING_MODES[currentSamplingMode];
 
   try {
+    // Modes that have tool access
+    const TOOL_MODES = new Set(['kivi', 'qwen-copilot', 'qwen-claude', 'copilot', 'claude']);
     const body = {
       provider,
       model: currentModelId,
       messages: apiMessages,
       system_prompt: SYSTEM_PROMPTS[currentMode],
       temperature: sampling.temperature,
+      enable_tools: TOOL_MODES.has(currentMode),
     };
     if (streamSessionId && !streamSessionId.startsWith('temp-')) {
       body.session_id = streamSessionId;
