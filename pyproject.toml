@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kivi-ai"
-version = "0.1.3"
+version = "0.1.4"
 description = "Kivi — Unified AI chat interface. Provider-agnostic streaming chat with tools, sessions, auto-compaction. Supports OpenAI, vLLM, GitHub Copilot SDK, Claude Agent SDK."
 readme = "README.md"
 license = { text = "MIT" }

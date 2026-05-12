@@ -62,7 +62,7 @@ def _register_providers():
 
     # OpenAI (direct API)
     Registry.register_provider("openai", OpenAIProvider(
-        api_key=os.environ.get("OPENAI_API_KEY", ""),
+        api_key=os.environ.get("OPENAI_API_KEY", "sk-xxx"),
     ))
 
     VLLM_MODEL = os.environ.get("VLLM_MODEL", "default")
@@ -242,11 +242,11 @@ async def chat_stream(request: Request):
                     result = await tool_impl.execute(tool_args, work_dir=WORK_DIR)
 
                     # Emit tool_complete event
-                    yield f"data: {json.dumps({'type': 'tool_complete', 'tool_call_id': tool_call_id, 'name': tool_name, 'result': result.output, 'is_error': result.is_error})}\n\n"
+                    yield f"data: {json.dumps({'type': 'tool_complete', 'tool_call_id': tool_call_id, 'name': tool_name, 'result': result.content, 'is_error': result.is_error})}\n\n"
 
                     tool_results_for_msg.append(ToolResult(
                         tool_call_id=tool_call_id,
-                        content=result.output,
+                        content=result.content,
                         is_error=result.is_error,
                     ))
                 except Exception as e:
