@@ -263,9 +263,11 @@
     .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
 
     /* Tool blocks */
+    .tool-calls-container { width: 100%; }
     .tool-block {
       margin: 10px 0; border: 1px solid var(--border-subtle);
       border-radius: 12px; overflow: hidden; background: var(--bg-surface);
+      width: 100%; display: block;
     }
     .tool-header {
       display: flex; align-items: center; gap: 8px;
@@ -1098,12 +1100,12 @@ const SAMPLING_MODES = {
 const TOOL_ICONS = { bash:'\u2318', read:'\uD83D\uDCC4', write:'\u270D\uFE0F', edit:'\u2702\uFE0F', glob:'\uD83D\uDD0D', grep:'\uD83D\uDD0E', web_search:'\uD83C\uDF10', web_fetch:'\uD83C\uDF10', default:'\uD83D\uDD27' };
 
 const SYSTEM_PROMPTS = {
-  chat: 'You are Kivi, a helpful AI assistant. Be concise, helpful, and friendly. Format responses in markdown when helpful.',
-  kivi: 'You are Kivi, an AI coding agent with access to tools. You MUST use your tools to help the user — NEVER say you cannot do something when you have a tool for it. For web requests, use web_search or web_fetch. For file operations, use read/write/edit/glob/grep. For shell commands, use bash. Always use tools proactively. Plan first, then execute step by step.',
-  copilot: 'You are a helpful AI assistant powered by GitHub Copilot. Be concise, helpful, and friendly. Format responses in markdown when helpful.',
-  'qwen-copilot': 'You are a helpful AI assistant. Be concise, helpful, and friendly. Format responses in markdown when helpful.',
-  claude: 'You are a helpful AI assistant powered by Claude. Be concise, helpful, and friendly.',
-  'qwen-claude': 'You are a helpful AI assistant. Be concise, helpful, and friendly.',
+  chat: '',
+  kivi: '',
+  copilot: '',
+  'qwen-copilot': '',
+  claude: '',
+  'qwen-claude': '',
 };
 
 // Provider → mode mapping (for display)
@@ -1131,7 +1133,7 @@ let abortController = null;
 let stopRequested = false;
 const _chatStreaming = {};
 const _chatDomCache = {};
-let currentMode = 'chat';
+let currentMode = 'kivi';
 let currentSamplingMode = 'thinking_general';
 let currentTheme = 'dark';
 let uploadedFiles = { welcome: [], chat: [] };
@@ -1266,7 +1268,6 @@ function setTheme(theme) {
 // ===== MODE =====
 async function setMode(mode) {
   currentMode = mode;
-  localStorage.setItem('unified_mode', mode);
   document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   const placeholders = {
     chat: ['How can I help you today?', 'Reply to Kivi...'],
@@ -1434,14 +1435,30 @@ function removeFile(ctx, idx) {
 function getSession(id) { return sessions.find(s => s.id === id); }
 
 async function loadSessions() {
+  // Load persisted mode map from localStorage (session_id → mode)
+  let modeMap = {};
+  try { modeMap = JSON.parse(localStorage.getItem('kivi_session_modes') || '{}'); } catch(e) {}
   try {
     const resp = await fetch('/api/sessions');
-    sessions = await resp.json();
+    const serverSessions = await resp.json();
+    // Merge locally-stored mode into server sessions
+    sessions = serverSessions.map(s => ({ ...s, mode: modeMap[s.id] || s.mode || 'kivi' }));
   } catch(e) {
     console.warn('Failed to load sessions:', e);
     sessions = [];
   }
   renderChatList();
+}
+
+function _saveSessionMode(id, mode) {
+  try {
+    const m = JSON.parse(localStorage.getItem('kivi_session_modes') || '{}');
+    m[id] = mode;
+    // Keep only last 200 sessions to avoid unbounded growth
+    const keys = Object.keys(m);
+    if (keys.length > 200) keys.slice(0, keys.length - 200).forEach(k => delete m[k]);
+    localStorage.setItem('kivi_session_modes', JSON.stringify(m));
+  } catch(e) {}
 }
 
 function newChat() {
@@ -1479,6 +1496,7 @@ async function createSession(firstMessage) {
     const session = { id: data.id, title, provider, model: currentModelId, mode: currentMode, created_at: Date.now(), updated_at: Date.now() };
     sessions.unshift(session);
     currentSessionId = data.id;
+    _saveSessionMode(data.id, currentMode);
     currentMessages = [];
     renderChatList();
     return data.id;
@@ -1525,10 +1543,10 @@ async function switchToChat(id) {
   const title = session?.title || 'Chat';
   document.getElementById('chatTitleText').textContent = title;
 
-  // Set mode/model from session
+  // Set mode/model from session — prefer session.mode, fall back to provider
   if (session) {
-    const providerToMode = { vllm: 'chat', copilot: 'copilot', 'qwen-copilot': 'qwen-copilot', claude: 'claude', 'qwen-claude': 'qwen-claude' };
-    const mode = providerToMode[session.provider] || session.mode || 'chat';
+    const providerToMode = { copilot: 'copilot', 'qwen-copilot': 'qwen-copilot', claude: 'claude', 'qwen-claude': 'qwen-claude' };
+    const mode = session.mode || providerToMode[session.provider] || 'kivi';
     if (session.model) currentModelId = session.model;
     if (mode !== currentMode) {
       await setMode(mode);
@@ -1753,10 +1771,9 @@ async function streamUnified() {
   const sampling = SAMPLING_MODES[currentSamplingMode];
 
   try {
-    // Modes that have tool access
-    const TOOL_MODES = new Set(['kivi', 'qwen-copilot', 'qwen-claude', 'copilot', 'claude']);
     const body = {
       provider,
+      mode: currentMode,
       model: currentModelId,
       messages: apiMessages,
       system_prompt: SYSTEM_PROMPTS[currentMode],
@@ -1766,7 +1783,6 @@ async function streamUnified() {
       presence_penalty: sampling.presence_penalty,
       repetition_penalty: sampling.repetition_penalty,
       enable_thinking: sampling.thinking,
-      enable_tools: TOOL_MODES.has(currentMode),
     };
     if (streamSessionId && !streamSessionId.startsWith('temp-')) {
       body.session_id = streamSessionId;
@@ -1804,6 +1820,7 @@ async function streamUnified() {
             if (chunk.session_id && (!currentSessionId || currentSessionId.startsWith('temp-'))) {
               const previousId = currentSessionId;
               currentSessionId = chunk.session_id;
+              _saveSessionMode(chunk.session_id, currentMode);
               const tempIndex = previousId ? sessions.findIndex(s => s.id === previousId) : -1;
               const existing = sessions.find(s => s.id === chunk.session_id);
               if (tempIndex >= 0) {
@@ -1815,6 +1832,8 @@ async function streamUnified() {
               renderChatList();
             }
           } else if (chunk.type === 'delta') {
+            // Remove processing indicator when real content starts
+            contentEl.querySelector('.processing-indicator')?.remove();
             // Finalize thinking if transitioning
             if (thinkingBlock.style.display !== 'none' && !thinkingBlock.dataset.done) {
               thinkingBlock.dataset.done = '1';
@@ -1832,11 +1851,20 @@ async function streamUnified() {
               thinkingBlock.style.display = '';
               thinkingStartTime = Date.now();
             }
+            // If thinking was finalized (from a prior round), reopen it
+            if (thinkingBlock.dataset.done) {
+              delete thinkingBlock.dataset.done;
+              thinkingLabel.textContent = 'Thinking...';
+              if (thinkingDots) thinkingDots.style.display = '';
+              thinkingBlock.querySelector('.thinking-header').classList.remove('collapsed');
+              thinkingBody.classList.remove('collapsed');
+            }
             reasoning += chunk.content;
             thinkingBody.textContent = reasoning;
             thinkingBody.scrollTop = thinkingBody.scrollHeight;
             safeScroll();
           } else if (chunk.type === 'tool_start') {
+            console.debug('[tool_start]', chunk.tool_call_id, chunk.name);
             // Skip internal tools like report_intent
             if (chunk.name === 'report_intent') {
               _toolDivs['_skip_' + chunk.tool_call_id] = true;
@@ -1870,6 +1898,7 @@ async function streamUnified() {
               if (pre) pre.textContent = chunk.message || chunk.content || 'Working...';
             }
           } else if (chunk.type === 'tool_complete') {
+            console.debug('[tool_complete]', chunk.tool_call_id, chunk.name, 'known_ids:', Object.keys(_toolDivs));
             const td = _toolDivs[chunk.tool_call_id];
             if (td && td.div) {
               const statusEl = td.div.querySelector('.tool-status');
@@ -1890,7 +1919,27 @@ async function streamUnified() {
             safeScroll();
           } else if (chunk.type === 'compaction') {
             showToast('Context compacted — older messages summarized');
+          } else if (chunk.type === 'processing') {
+            // Model is processing tool results — show activity in content area
+            if (!contentEl.querySelector('.processing-indicator')) {
+              const ind = document.createElement('span');
+              ind.className = 'processing-indicator';
+              ind.style.cssText = 'opacity:0.5;font-size:13px;font-style:italic;';
+              ind.textContent = ' Processing...';
+              contentEl.appendChild(ind);
+            }
+            // Reset thinking block so round 2 thinking shows fresh
+            if (thinkingBlock.dataset.done) {
+              delete thinkingBlock.dataset.done;
+              thinkingBlock.style.display = 'none';
+              thinkingLabel.textContent = 'Thinking...';
+              if (thinkingDots) thinkingDots.style.display = '';
+              thinkingBlock.querySelector('.thinking-header').classList.remove('collapsed');
+              thinkingBody.classList.remove('collapsed');
+            }
           } else if (chunk.type === 'done') {
+            // Remove processing indicator if present
+            contentEl.querySelector('.processing-indicator')?.remove();
             // Final metadata from server
             costInfo = chunk;
             // Finalize thinking
@@ -1900,6 +1949,19 @@ async function streamUnified() {
               thinkingDots.style.display = 'none';
               thinkingBlock.querySelector('.thinking-header').classList.add('collapsed');
               thinkingBody.classList.add('collapsed');
+            }
+            // Fallback: if model produced no content AND no tool calls, surface the thinking as the answer
+            if (!content && Object.keys(_toolDivs).filter(k => !k.startsWith('_skip_')).length === 0) {
+              if (reasoning) {
+                content = reasoning;
+                contentEl.innerHTML = renderMarkdown(content);
+                // Keep thinking expanded for transparency
+                thinkingBlock.querySelector('.thinking-header').classList.remove('collapsed');
+                thinkingBody.classList.remove('collapsed');
+              } else {
+                content = '*[No response — model returned empty. Try rephrasing or retry.]*';
+                contentEl.innerHTML = renderMarkdown(content);
+              }
             }
           } else if (chunk.type === 'error') {
             content = '**Error:** ' + (chunk.content || chunk.message || 'Unknown error');
@@ -2860,10 +2922,8 @@ async function init() {
   document.getElementById('greetingText').textContent = g + ' — Kivi';
 
   const savedTheme = localStorage.getItem('unified_theme');
-  const savedMode = localStorage.getItem('unified_mode');
   const savedSampling = localStorage.getItem('unified_sampling');
   if (savedTheme) currentTheme = savedTheme;
-  if (savedMode) currentMode = savedMode;
   if (savedSampling) currentSamplingMode = savedSampling;
 
   setTheme(currentTheme);

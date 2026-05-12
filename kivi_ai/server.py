@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
+logger = logging.getLogger("kivi.server")
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -26,12 +30,39 @@ from .tools.builtins import register_builtin_tools
 
 VLLM_URL = os.environ.get("VLLM_URL", "http://192.168.170.49:8077")
 WORK_DIR = os.path.expanduser("~")
+KIVI_MD_PATH = Path.home() / ".kivi" / "KIVI.md"
+
+DEFAULT_KIVI_MD = """\
+# KIVI.md
+
+## Output
+- LaTeX: `$...$` inline, `$$...$$` block
+- Markdown with syntax-highlighted code blocks
+
+## Render Tags
+To display files inline, use `<render_inline>` tags:
+- `<render_inline type="image" src="/path/to/file.png"/>` — image preview
+- `<render_inline type="video" src="/path/to/file.mp4"/>` — video player
+- `<render_inline type="text" src="/path/to/file.txt"/>` — file content
+- `<render_inline type="file" src="/path/to/file.pdf"/>` — download link
+Only use render_inline when you want to display the file. Plain paths stay as text.
+"""
 
 app = FastAPI(title="Unified AI Chat")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # ── Globals ──────────────────────────────────────────────────────────
 _session_manager: SessionManager | None = None
+_kivi_md: str = ""
+
+
+def _load_kivi_md() -> str:
+    global _kivi_md
+    if not KIVI_MD_PATH.exists():
+        KIVI_MD_PATH.parent.mkdir(parents=True, exist_ok=True)
+        KIVI_MD_PATH.write_text(DEFAULT_KIVI_MD)
+    _kivi_md = KIVI_MD_PATH.read_text().strip()
+    return _kivi_md
 
 
 def _mgr() -> SessionManager:
@@ -45,6 +76,7 @@ def _mgr() -> SessionManager:
 
 @app.on_event("startup")
 async def startup():
+    _load_kivi_md()
     register_builtin_tools()
     _register_providers()
     await Registry.initialize_all()
@@ -109,6 +141,9 @@ async def chat_stream(request: Request):
     session_id = data.get("session_id")
     raw_messages = data.get("messages", [])
     system_prompt = data.get("system_prompt")
+    # Append KIVI.md to any system prompt (skills/render tags available to all modes)
+    if _kivi_md and system_prompt:
+        system_prompt = system_prompt + "\n\n---\n" + _kivi_md
     temperature = data.get("temperature")
     top_p = data.get("top_p")
     top_k = data.get("top_k")
@@ -160,13 +195,15 @@ async def chat_stream(request: Request):
     # Check compaction before streaming
     use_vllm = provider_name.startswith("qwen-")
 
-    # Check if tools should be enabled (frontend sends enable_tools flag or mode implies it)
-    enable_tools = data.get("enable_tools", True)  # default on — let the model decide
+    # Tool schemas are sent based on mode — server decides, not the UI
+    # chat mode = no tools; all other modes (kivi, copilot, claude, qwen-*) = full tool set
+    mode = data.get("mode", "kivi")
     tool_schemas = None
-    if enable_tools and provider.supports_tools:
+    if mode != "chat" and provider.supports_tools:
         tools_list = Registry.list_tools()
         if tools_list:
             tool_schemas = [t.schema for t in tools_list]
+    logger.debug(f"REQUEST mode={mode} provider={provider_name} model={model} tools={[t.name for t in tool_schemas] if tool_schemas else None} enable_thinking={enable_thinking}")
 
     async def generate():
         # Compaction check
@@ -193,6 +230,7 @@ async def chat_stream(request: Request):
             round_content = ""
             round_thinking = ""
             round_tool_calls: list[dict] = []
+            logger.debug(f"ROUND {tool_round} starting, messages={len(current_messages)}")
 
             try:
                 raw_stream = provider.stream(
@@ -215,6 +253,10 @@ async def chat_stream(request: Request):
                     elif chunk.type == ChunkType.DONE:
                         stream_meta = chunk.metadata
                         round_tool_calls = stream_meta.get("tool_calls", [])
+                        logger.debug(f"ROUND {tool_round} DONE: tool_calls={[tc['name'] for tc in round_tool_calls]} content_len={len(round_content)} thinking_len={len(round_thinking)}")
+                        continue
+                    elif chunk.type == ChunkType.TOOL_START:
+                        logger.debug(f"ROUND {tool_round} TOOL_START: {chunk.metadata}")
                     yield f"data: {json.dumps(chunk.to_sse_dict())}\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
@@ -275,6 +317,9 @@ async def chat_stream(request: Request):
                 tool_results=tool_results_for_msg,
             ))
 
+            # Signal UI that model is processing tool results
+            yield f"data: {json.dumps({'type': 'processing'})}\n\n"
+
         # Store assistant response
         if full_content or full_thinking:
             assistant_msg = Message(
@@ -294,6 +339,9 @@ async def chat_stream(request: Request):
             output_tokens = provider.count_tokens(full_content, model)
         cost = stream_meta.get("cost_usd", estimate_cost(model, input_tokens, output_tokens))
         await mgr.log_usage(session_id, model, input_tokens, output_tokens, cost)
+
+        # Send final DONE with token/cost metadata
+        yield f"data: {json.dumps({'type': 'done', 'content': '', 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost_usd': cost, 'model': model})}\n\n"
 
     return StreamingResponse(
         generate(),
@@ -390,6 +438,19 @@ async def list_models(provider_name: str):
 async def list_tools():
     tools = Registry.list_tools()
     return JSONResponse([t.schema.to_openai_schema() for t in tools])
+
+
+# ── KIVI.md ──────────────────────────────────────────────────────────
+
+@app.get("/api/kivi-md")
+async def get_kivi_md():
+    return JSONResponse({"content": _kivi_md, "path": str(KIVI_MD_PATH)})
+
+
+@app.post("/api/kivi-md/reload")
+async def reload_kivi_md():
+    _load_kivi_md()
+    return JSONResponse({"ok": True, "content": _kivi_md})
 
 
 # ── Usage stats ──────────────────────────────────────────────────────
