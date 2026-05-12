@@ -69,7 +69,7 @@ class ClaudeProvider(BaseProvider):
             opts: dict[str, Any] = {
                 "model": model,
                 "permission_mode": "bypassPermissions",
-                "max_turns": 10,
+                "max_turns": 250,
                 "include_partial_messages": True,
             }
 
