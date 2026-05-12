@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any, AsyncIterator
+
+logger = logging.getLogger("kivi.copilot_provider")
 
 from ..core.interfaces import BaseProvider
 from ..core.types import (
@@ -26,16 +29,25 @@ class CopilotProvider(BaseProvider):
         self._lock = asyncio.Lock()
 
     async def _get_client(self):
-        if self._client is None:
-            async with self._lock:
-                if self._client is None:
-                    from copilot import CopilotClient
-                    self._client = CopilotClient(auto_start=True)
-                    await self._client.start()
+        """Get or create a Copilot client, restarting if the subprocess died."""
+        async with self._lock:
+            if self._client is not None:
+                # Check if the subprocess is still alive
+                try:
+                    proc = getattr(self._client, '_process', None) or getattr(self._client, 'process', None)
+                    if proc and hasattr(proc, 'returncode') and proc.returncode is not None:
+                        logger.warning("Copilot CLI subprocess died, restarting...")
+                        self._client = None
+                except Exception:
+                    pass
+            if self._client is None:
+                from copilot import CopilotClient
+                self._client = CopilotClient(auto_start=True)
+                await self._client.start()
         return self._client
 
     async def initialize(self) -> None:
-        await self._get_client()
+        pass  # Lazy init on first use to avoid startup failures
 
     async def shutdown(self) -> None:
         if self._client:
@@ -59,8 +71,45 @@ class CopilotProvider(BaseProvider):
         use_vllm: bool = False,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
-        client = await self._get_client()
+        logger.info(f"COPILOT STREAM CALLED: model={model} use_vllm={use_vllm} vllm_url={self._vllm_url}")
+        
+        # On BrokenPipeError, reset client and retry once
+        for attempt in range(2):
+            try:
+                client = await self._get_client()
+                async for chunk in self._do_stream(client, messages, model, tools=tools,
+                        system_prompt=system_prompt, temperature=temperature,
+                        max_tokens=max_tokens, use_vllm=use_vllm, **kwargs):
+                    yield chunk
+                return
+            except (BrokenPipeError, ConnectionError, OSError) as e:
+                if attempt == 0:
+                    logger.warning(f"Copilot pipe error, resetting client: {e}")
+                    self._client = None
+                else:
+                    yield StreamChunk(type=ChunkType.ERROR, content=str(e))
+            except Exception as e:
+                yield StreamChunk(type=ChunkType.ERROR, content=str(e))
+                return
+
+    async def _do_stream(
+        self,
+        client,
+        messages: list[Message],
+        model: str | None = None,
+        *,
+        tools: list[ToolSchema] | None = None,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        use_vllm: bool = False,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamChunk]:
         model = model or "gpt-4.1"
+
+        # For qwen-copilot: resolve actual vLLM model name
+        if use_vllm and self._vllm_url:
+            model = await self._resolve_vllm_model(model)
 
         # Extract last user prompt
         prompt = ""
@@ -95,6 +144,7 @@ class CopilotProvider(BaseProvider):
 
             def on_evt(evt):
                 t = evt.type.value if hasattr(evt.type, "value") else str(evt.type)
+                logger.debug(f"COPILOT EVENT: {t}")
                 if t == "assistant.message_delta":
                     delta = evt.data.delta_content if hasattr(evt.data, "delta_content") else ""
                     if delta:
@@ -136,10 +186,12 @@ class CopilotProvider(BaseProvider):
                     }))
 
             unsub = session.on(on_evt)
+            logger.info(f"COPILOT: sending prompt to model={model} use_vllm={use_vllm} provider={provider}")
             await session.send(prompt)
 
             # Stream events as they arrive
             sent_idx = 0
+            had_deltas = False
             timeout_at = asyncio.get_event_loop().time() + 120
             while not done_event.is_set():
                 if asyncio.get_event_loop().time() > timeout_at:
@@ -149,7 +201,9 @@ class CopilotProvider(BaseProvider):
                 while sent_idx < len(collected):
                     item = collected[sent_idx]
                     sent_idx += 1
-                    chunk = self._map_event(item, model)
+                    if item[0] == "delta":
+                        had_deltas = True
+                    chunk = self._map_event(item, model, had_deltas=had_deltas)
                     if chunk:
                         yield chunk
 
@@ -157,7 +211,9 @@ class CopilotProvider(BaseProvider):
             while sent_idx < len(collected):
                 item = collected[sent_idx]
                 sent_idx += 1
-                chunk = self._map_event(item, model)
+                if item[0] == "delta":
+                    had_deltas = True
+                chunk = self._map_event(item, model, had_deltas=had_deltas)
                 if chunk:
                     yield chunk
 
@@ -169,12 +225,16 @@ class CopilotProvider(BaseProvider):
             yield StreamChunk(type=ChunkType.ERROR, content=str(e))
 
     @staticmethod
-    def _map_event(item: tuple, model: str) -> StreamChunk | None:
+    def _map_event(item: tuple, model: str, *, had_deltas: bool = False) -> StreamChunk | None:
         kind = item[0]
         if kind == "delta":
             return StreamChunk(type=ChunkType.DELTA, content=item[1])
         elif kind == "message":
-            return StreamChunk(type=ChunkType.DELTA, content=item[1],
+            # Skip full message if we already streamed deltas (avoids duplication)
+            if had_deltas and not item[2]:
+                return None
+            content = "" if had_deltas else item[1]
+            return StreamChunk(type=ChunkType.DELTA, content=content,
                                metadata={"reasoning": item[2]} if item[2] else {})
         elif kind == "tool_start":
             return StreamChunk(type=ChunkType.TOOL_START, metadata=item[1])
@@ -185,9 +245,42 @@ class CopilotProvider(BaseProvider):
             return StreamChunk(type=ChunkType.TOOL_COMPLETE, metadata=item[1])
         return None
 
+    # ── vLLM model resolution ────────────────────────────────────────
+
+    async def _resolve_vllm_model(self, fallback: str = "default") -> str:
+        """Fetch actual model ID from vLLM server."""
+        if not self._vllm_url:
+            return fallback
+        try:
+            import httpx
+            async with httpx.AsyncClient() as c:
+                resp = await c.get(f"{self._vllm_url}/v1/models", timeout=5)
+                return resp.json()["data"][0]["id"]
+        except Exception:
+            return fallback
+
     # ── Model listing ────────────────────────────────────────────────
 
     async def list_models(self) -> list[ModelInfo]:
+        # For qwen-copilot: list vLLM models instead of Copilot models
+        if self._vllm_url:
+            try:
+                import httpx
+                async with httpx.AsyncClient() as c:
+                    resp = await c.get(f"{self._vllm_url}/v1/models", timeout=5)
+                    data = resp.json().get("data", [])
+                    return [
+                        ModelInfo(
+                            id=m["id"],
+                            name=m["id"].split("/")[-1] if "/" in m["id"] else m["id"],
+                            provider=ProviderType.COPILOT,
+                            context_window=m.get("max_model_len", 128_000),
+                        )
+                        for m in data
+                    ]
+            except Exception:
+                pass
+
         try:
             client = await self._get_client()
             models = await client.list_models()

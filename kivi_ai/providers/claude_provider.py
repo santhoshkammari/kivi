@@ -201,6 +201,26 @@ class ClaudeProvider(BaseProvider):
     # ── Model listing ────────────────────────────────────────────────
 
     async def list_models(self) -> list[ModelInfo]:
+        # For qwen-claude: list vLLM models instead of Claude models
+        if self._vllm_url:
+            try:
+                import httpx
+                async with httpx.AsyncClient() as c:
+                    resp = await c.get(f"{self._vllm_url}/v1/models", timeout=5)
+                    data = resp.json().get("data", [])
+                    return [
+                        ModelInfo(
+                            id=m["id"],
+                            name=m["id"].split("/")[-1] if "/" in m["id"] else m["id"],
+                            provider=ProviderType.CLAUDE,
+                            context_window=m.get("max_model_len", 128_000),
+                            supports_thinking=True,
+                        )
+                        for m in data
+                    ]
+            except Exception:
+                pass
+
         return [
             ModelInfo(
                 id="haiku", name="Claude Haiku", provider=ProviderType.CLAUDE,
