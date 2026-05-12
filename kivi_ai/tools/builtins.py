@@ -236,7 +236,7 @@ class WebFetchTool(ToolInterface):
 # ── Registration helper ──────────────────────────────────────────────
 
 ALL_BUILTIN_TOOLS: list[type[ToolInterface]] = [
-    BashTool, ReadTool, WriteTool, EditTool, GlobTool, GrepTool, WebSearchTool, WebFetchTool,
+    BashTool, ReadTool, WriteTool, EditTool, GlobTool, GrepTool, WebSearchTool,
 ]
 
 

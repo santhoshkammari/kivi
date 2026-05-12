@@ -112,6 +112,11 @@ class OpenAIProvider(BaseProvider):
                 choice = chunk.choices[0]
                 delta = choice.delta
 
+                # Reasoning/thinking delta (qwen3, o1, etc.)
+                reasoning = getattr(delta, "reasoning", None) or getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    yield StreamChunk(type=ChunkType.THINKING_DELTA, content=reasoning)
+
                 # Text delta (token-level)
                 if delta and delta.content:
                     full_content += delta.content
