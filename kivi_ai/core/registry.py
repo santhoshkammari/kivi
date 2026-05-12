@@ -48,8 +48,12 @@ class Registry:
 
     @classmethod
     async def initialize_all(cls) -> None:
-        for p in cls._providers.values():
-            await p.initialize()
+        for name, p in cls._providers.items():
+            try:
+                await p.initialize()
+            except Exception as e:
+                import logging
+                logging.warning(f"Provider '{name}' failed to initialize: {e}")
 
     @classmethod
     async def shutdown_all(cls) -> None:
