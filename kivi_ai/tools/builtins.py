@@ -46,12 +46,18 @@ class BashTool(ToolInterface):
         cmd = arguments.get("command", "")
         timeout = min(int(arguments.get("timeout", 120)), 300)
         try:
+            env = {**os.environ, "TERM": "dumb"}
+            kivi_env = os.environ.get("KIVI_ENV_PATH", "")
+            if kivi_env:
+                p = Path(kivi_env)
+                bin_dir = str(p.parent if p.suffix else p / "bin")
+                env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
             r = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: subprocess.run(
                     ["bash", "-c", cmd], capture_output=True, text=True,
                     timeout=timeout, cwd=work_dir or None,
-                    env={**os.environ, "TERM": "dumb"},
+                    env=env,
                 ),
             )
             out = ((r.stdout or "") + (r.stderr or "")).strip()

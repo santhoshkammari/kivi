@@ -57,8 +57,13 @@ def _truncate(text: str, limit: int = _OUTPUT_LIMIT) -> str:
 
 
 def _tool_env() -> dict[str, str]:
-    """Inherit the caller's environment (preserves activated venvs)."""
-    return os.environ.copy()
+    env = os.environ.copy()
+    kivi_env = env.get("KIVI_ENV_PATH", "")
+    if kivi_env:
+        p = Path(kivi_env)
+        bin_dir = str(p.parent if p.suffix else p / "bin")
+        env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
+    return env
 
 
 def _display_path(path: Path, ctx: Context) -> str:
