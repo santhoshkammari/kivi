@@ -1,2 +1,2 @@
-"""Kivi — Unified AI Chat Interface."""
-__version__ = "0.2.1"
+"""Kivi — Unified AI Chat Interface & Agent CLI."""
+__version__ = "0.3.0"
