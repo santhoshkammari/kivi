@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from rich.console import Console
@@ -35,8 +36,10 @@ _SLASH_COMMANDS = ["/help", "/modes", "/mode", "/clear", "/history", "/cwd", "/t
 
 
 def _build_system_prompt(registry: ToolRegistry) -> str:
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
     lines = [
         "You are Kivi Agent",
+        f"Current date and time: {now}",
     ]
     return "\n".join(lines)
 
