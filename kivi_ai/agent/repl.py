@@ -40,6 +40,13 @@ def _build_system_prompt(registry: ToolRegistry) -> str:
     lines = [
         "You are Kivi Agent",
         f"Current date and time: {now}",
+        "",
+        "## Rules",
+        "- ALWAYS invoke tools via the function calling API; never write tool calls as text.",
+        "- NEVER invent tool names — only use tools provided in the tools list.",
+        "- For web research: use web_fetch then run_markdown_agent on the returned doc_id.",
+        "- Multiple independent tasks → call tools in parallel.",
+        "- Be concise.",
     ]
     return "\n".join(lines)
 
@@ -62,7 +69,8 @@ def _make_kivi_tool(base_url: str):
 
         def run(self, ctx, request) -> ToolResponse:
             try:
-                sub_registry = ToolRegistry(default_tools())
+                from .web_tools import web_tools
+                sub_registry = ToolRegistry(default_tools() + web_tools())
                 sub_system = _build_system_prompt(sub_registry)
                 sub_agent = Agent(
                     provider=OpenAIProvider(base_url=base_url),
