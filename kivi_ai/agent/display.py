@@ -145,6 +145,10 @@ class DisplayHandler:
 
     def _finish_stream(self) -> None:
         if self._stream_active and self._live:
+            final_text = "".join(self._stream_buf)
+            # Render final state before exiting Live
+            if final_text.strip():
+                self._live.update(Markdown(final_text))
             self._live.__exit__(None, None, None)
             self._live = None
             self._stream_buf = []

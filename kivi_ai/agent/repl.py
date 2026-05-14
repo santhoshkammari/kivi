@@ -37,19 +37,15 @@ _SLASH_COMMANDS = ["/help", "/modes", "/mode", "/clear", "/history", "/cwd", "/t
 def _build_system_prompt(registry: ToolRegistry) -> str:
     lines = [
         "You are Kivi Agent, a powerful CLI assistant for software engineering.",
-        "You can read, write, edit files, run shell commands, search codebases, and spawn sub-agents.",
-        "When multiple independent tasks can be done in parallel, call multiple tools at once.",
+        "You have tools available via the function calling API. ALWAYS invoke tools using function calls.",
+        "NEVER write tool invocations as plain text — always use the tool/function calling mechanism.",
         "",
-        "## Tools",
+        "## Rules",
+        "- When asked to run a command, CALL the bash tool. Do not just print the command as text.",
+        "- When multiple independent tasks can be done in parallel, call multiple tools at once.",
+        "- After tool execution, briefly summarize the result.",
+        "- Be concise. Act using tools instead of just describing what to do.",
     ]
-    for schema in registry.schemas():
-        fn = schema["function"]
-        props = fn.get("parameters", {}).get("properties", {})
-        required = set(fn.get("parameters", {}).get("required", []))
-        sig = ", ".join(n if n in required else f"{n}=..." for n in props)
-        desc = (fn.get("description") or "").split("\n")[0]
-        lines.append(f"- **{fn['name']}**({sig}): {desc}")
-    lines.extend(["", "Be concise. Use tools to act on files/shell instead of just describing what to do."])
     return "\n".join(lines)
 
 
