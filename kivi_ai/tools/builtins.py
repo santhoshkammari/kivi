@@ -6,7 +6,6 @@ import difflib
 import os
 import re
 import subprocess
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -210,25 +209,56 @@ class WebSearchTool(ToolInterface):
 
 
 class WebFetchTool(ToolInterface):
+    """Fetch a URL and return its content as Markdown using Scrapling."""
+
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="web_fetch",
-            description="Fetch a webpage and extract text",
+            description="Fetch a webpage and extract its content as Markdown",
             parameters=[
                 ToolParameter(name="url", type="string", description="URL to fetch", required=True),
             ],
         )
 
     async def execute(self, arguments: dict[str, Any], *, work_dir: str = "") -> ToolResult:
+        url = arguments.get("url", "")
         try:
-            req = urllib.request.Request(arguments.get("url", ""), headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                html = resp.read().decode("utf-8", errors="replace")
-            text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL)
-            text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
-            text = re.sub(r"<[^>]+>", " ", text)
-            return ToolResult(tool_call_id="", content=_truncate(re.sub(r"\s+", " ", text).strip(), 6000))
+            from scrapling.fetchers import Fetcher
+            from scrapling.core.shell import Convertor
+
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: Fetcher.get(
+                    url,
+                    timeout=30,
+                    retries=3,
+                    retry_delay=1,
+                    impersonate="chrome",
+                ),
+            )
+            content = list(
+                Convertor._extract_content(
+                    result,
+                    css_selector=None,
+                    extraction_type="markdown",
+                    main_content_only=True,
+                )
+            )
+            if not content or result.status != 200:
+                return ToolResult(
+                    tool_call_id="",
+                    content=f"[web_fetch error] Failed to fetch content (status {result.status})",
+                    is_error=True,
+                )
+            markdown = "".join(content)
+            return ToolResult(tool_call_id="", content=_truncate(markdown, 8000))
+        except ImportError:
+            return ToolResult(
+                tool_call_id="",
+                content="[web_fetch] Install: pip install scrapling",
+                is_error=True,
+            )
         except Exception as e:
             return ToolResult(tool_call_id="", content=f"[web_fetch error] {e}", is_error=True)
 
@@ -236,7 +266,7 @@ class WebFetchTool(ToolInterface):
 # ── Registration helper ──────────────────────────────────────────────
 
 ALL_BUILTIN_TOOLS: list[type[ToolInterface]] = [
-    BashTool, ReadTool, WriteTool, EditTool, GlobTool, GrepTool, WebSearchTool,
+    BashTool, ReadTool, WriteTool, EditTool, GlobTool, GrepTool, WebSearchTool, WebFetchTool,
 ]
 
 
