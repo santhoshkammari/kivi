@@ -4,7 +4,6 @@ from __future__ import annotations
 import difflib
 import os
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -58,10 +57,8 @@ def _truncate(text: str, limit: int = _OUTPUT_LIMIT) -> str:
 
 
 def _tool_env() -> dict[str, str]:
-    env = os.environ.copy()
-    bin_dir = str(Path(sys.executable).parent)
-    env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
-    return env
+    """Inherit the caller's environment (preserves activated venvs)."""
+    return os.environ.copy()
 
 
 def _display_path(path: Path, ctx: Context) -> str:
