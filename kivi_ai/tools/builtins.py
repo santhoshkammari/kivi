@@ -279,19 +279,31 @@ class RunMarkdownAgentTool(ToolInterface):
         return ToolSchema(
             name="run_markdown_agent",
             description=(
-                "Run the MarkdownAgent on a previously fetched/ingested document. "
-                "Pass the doc_id returned by web_fetch or md_ingest, and a natural language prompt. "
-                "The agent will surgically analyse the document and return a precise answer."
+                "Analyse a document previously stored by web_fetch or md_ingest. "
+                "REQUIRED: pass the exact 12-char hex doc_id returned by web_fetch as the `doc_id` argument, "
+                "and the natural-language question as the `prompt` argument. "
+                "Both arguments are mandatory — never call this tool without a valid doc_id from a prior web_fetch."
             ),
             parameters=[
-                ToolParameter(name="prompt", type="string", description="Question or task about the document", required=True),
-                ToolParameter(name="doc_id", type="string", description="doc_id from web_fetch or md_ingest", required=True),
+                ToolParameter(name="prompt", type="string", description="Natural-language question about the document. Argument key MUST be 'prompt'.", required=True),
+                ToolParameter(name="doc_id", type="string", description="12-char hex doc_id returned by web_fetch (e.g. 'c984d06aafbe'). Argument key MUST be 'doc_id'.", required=True),
             ],
         )
 
     async def execute(self, arguments: dict[str, Any], *, work_dir: str = "") -> ToolResult:
         prompt = arguments.get("prompt", "")
         doc_id = arguments.get("doc_id", "")
+        if not prompt or not doc_id:
+            got = sorted(arguments.keys())
+            return ToolResult(
+                tool_call_id="",
+                content=(
+                    f"[run_markdown_agent] missing required arguments. "
+                    f"Required: 'prompt' and 'doc_id'. Got keys: {got}. "
+                    f"Re-call with both keys — 'prompt' must be the question, 'doc_id' must be the 12-char hex from web_fetch."
+                ),
+                is_error=True,
+            )
         try:
             from ..agents.markdown.store import list_documents
             from ..agents.markdown import MarkdownAgent
