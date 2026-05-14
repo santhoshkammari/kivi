@@ -36,15 +36,7 @@ _SLASH_COMMANDS = ["/help", "/modes", "/mode", "/clear", "/history", "/cwd", "/t
 
 def _build_system_prompt(registry: ToolRegistry) -> str:
     lines = [
-        "You are Kivi Agent, a powerful CLI assistant for software engineering.",
-        "You have tools available via the function calling API. ALWAYS invoke tools using function calls.",
-        "NEVER write tool invocations as plain text — always use the tool/function calling mechanism.",
-        "",
-        "## Rules",
-        "- When asked to run a command, CALL the bash tool. Do not just print the command as text.",
-        "- When multiple independent tasks can be done in parallel, call multiple tools at once.",
-        "- After tool execution, briefly summarize the result.",
-        "- Be concise. Act using tools instead of just describing what to do.",
+        "You are Kivi Agent",
     ]
     return "\n".join(lines)
 
