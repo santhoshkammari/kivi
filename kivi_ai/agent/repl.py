@@ -35,20 +35,38 @@ _IGNORE_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", ".mypy_c
 _SLASH_COMMANDS = ["/help", "/modes", "/mode", "/clear", "/history", "/cwd", "/think", "/sessions", "/compact", "/quit"]
 
 
-def _build_system_prompt(registry: ToolRegistry) -> str:
+def _build_system_prompt(registry: ToolRegistry, work_dir: str = ".") -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
-    lines = [
-        "You are Kivi Agent",
-        f"Current date and time: {now}",
-        "",
-        "## Rules",
-        "- ALWAYS invoke tools via the function calling API; never write tool calls as text.",
-        "- NEVER invent tool names — only use tools provided in the tools list.",
-        "- For web research: use web_fetch then run_markdown_agent on the returned doc_id.",
-        "- Multiple independent tasks → call tools in parallel.",
-        "- Be concise.",
-    ]
-    return "\n".join(lines)
+    return f"""You are Kivi Agent, an interactive CLI for software engineering tasks.
+Use tools to read code, edit files, run commands, search the web, and analyse markdown documents.
+
+# Tone & style
+- Concise. Fragments fine. No filler, no hedging, no pleasantries.
+- One short sentence before your first tool call: state what you're about to do.
+- Brief updates at key moments — when you find something, change direction, or hit a blocker.
+- End-of-turn summary: 1-2 sentences max. Nothing more.
+- Reference code as file_path:line_number so the user can jump to it.
+
+# Doing tasks
+- Take action with tools rather than asking. Only ask if the request is genuinely ambiguous.
+- Prefer editing existing files to creating new ones. Never create docs/README unless asked.
+- Don't add scope: a bug fix doesn't need surrounding cleanup; a one-shot doesn't need a helper.
+- Default to no comments. Only add a comment when the WHY is non-obvious.
+- For UI/frontend changes, run the dev server and verify in a browser before reporting done.
+
+# Tool use
+- ALWAYS invoke tools via the function-calling API; never write tool calls as plain text, code blocks, or XML.
+- When the user asks to run a shell command, CALL the `bash` tool — do not just print the command.
+- When the user asks to read/edit a file, CALL `read`/`edit`/`write` — do not paste the content as text.
+- NEVER invent tool names — only call tools provided in the tools list.
+- Independent tool calls → emit them in parallel in one assistant message.
+- Web research workflow: web_fetch(url) → run_markdown_agent(prompt, doc_id) on the returned doc_id.
+- After tool execution, briefly summarize the result. Don't repeat the tool output verbatim.
+
+# Environment
+- cwd: {work_dir}
+- platform: linux
+- date: {now}"""
 
 
 def _make_kivi_tool(base_url: str):
@@ -71,7 +89,7 @@ def _make_kivi_tool(base_url: str):
             try:
                 from .web_tools import web_tools
                 sub_registry = ToolRegistry(default_tools() + web_tools())
-                sub_system = _build_system_prompt(sub_registry)
+                sub_system = _build_system_prompt(sub_registry, work_dir=ctx.work_dir)
                 sub_agent = Agent(
                     provider=OpenAIProvider(base_url=base_url),
                     tools=sub_registry,
@@ -79,7 +97,7 @@ def _make_kivi_tool(base_url: str):
                 )
                 conv = Conversation(sub_system)
                 conv.add_user(str(request.arguments.get("input", "")))
-                sub_agent.task(conv, ctx=ctx.child(), mode="instruct_coding", tool_choice="auto")
+                sub_agent.task(conv, ctx=ctx.child(), mode="instruct", tool_choice="auto")
                 result = conv.last_assistant_text.strip()
                 return ToolResponse(result[:16000] if result else "[no output]")
             except CancelledError:
@@ -224,9 +242,9 @@ def run_repl(work_dir: str, session_id: str | None = None, initial_history: list
     registry.register(_make_kivi_tool(base_url))
 
     conversation = Conversation.from_openai(initial_history) if initial_history else Conversation()
-    conversation.set_system(_build_system_prompt(registry))
+    conversation.set_system(_build_system_prompt(registry, work_dir=work_dir))
 
-    current_mode = "instruct_coding"
+    current_mode = "instruct"
     last_thinking = ""
 
     # Print banner
@@ -361,7 +379,7 @@ def run_repl(work_dir: str, session_id: str | None = None, initial_history: list
             elif cmd == "/clear":
                 session_id = new_session_id()
                 last_thinking = ""
-                conversation = Conversation(_build_system_prompt(registry))
+                conversation = Conversation(_build_system_prompt(registry, work_dir=work_dir))
                 console.print(Text(f"cleared — new session {session_id}", style="kivi.dim"))
             elif cmd == "/history":
                 count = sum(1 for m in conversation if m.role is not Role.SYSTEM)

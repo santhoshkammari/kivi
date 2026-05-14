@@ -54,7 +54,7 @@ def _cmd_cli(argv):
         provider = OpenAIProvider(base_url=base_url)
         registry = ToolRegistry(default_tools() + web_tools())
         registry.register(_make_kivi_tool(base_url))
-        conversation = Conversation(_build_system_prompt(registry))
+        conversation = Conversation(_build_system_prompt(registry, work_dir=work_dir))
         conversation.add_user(prompt_text)
 
         banner = Text()
@@ -68,7 +68,7 @@ def _cmd_cli(argv):
 
         agent = Agent(provider=provider, tools=registry)
         ctx = Context(work_dir=work_dir)
-        mode = "thinking_coding" if args.think else "instruct_coding"
+        mode = "thinking" if args.think else "instruct"
         _process_turn_with_autocompact(agent, conversation, mode, ctx)
         print()
         return

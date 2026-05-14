@@ -16,19 +16,13 @@ __all__ = ["SamplingParams", "MODES", "ContentDelta", "ThinkingDelta", "ToolCall
 @dataclass
 class SamplingParams:
     temperature: float = 0.7
-    top_p: float = 0.95
-    top_k: int = 20
-    presence_penalty: float = 0.0
-    repetition_penalty: float = 1.0
+    top_p: float = 1.0
     max_tokens: int | None = None
 
 
 MODES: dict[str, SamplingParams] = {
-    "thinking_general": SamplingParams(temperature=1.0, top_p=0.95, top_k=20, presence_penalty=1.5),
-    "thinking_coding": SamplingParams(temperature=0.6, top_p=0.95, top_k=20),
-    "instruct_general": SamplingParams(temperature=0.7, top_p=0.8, top_k=20, presence_penalty=1.5),
-    "instruct_coding": SamplingParams(temperature=0.3, top_p=0.85, top_k=10, repetition_penalty=1.05),
-    "instruct_reasoning": SamplingParams(temperature=1.0, top_p=0.95, top_k=20, presence_penalty=1.5),
+    "instruct": SamplingParams(),
+    "thinking": SamplingParams(),
 }
 
 
@@ -61,7 +55,7 @@ class StreamComplete(ProviderEvent):
 
 
 def is_thinking_mode(mode_name: str) -> bool:
-    return mode_name.startswith("thinking_")
+    return mode_name == "thinking"
 
 
 def resolve_mode(mode: str | SamplingParams) -> SamplingParams:
@@ -99,8 +93,6 @@ class OpenAIProvider:
     ) -> Iterator[ProviderEvent]:
         ctx.check()
         extra_body: dict[str, Any] = {
-            "top_k": params.top_k,
-            "repetition_penalty": params.repetition_penalty,
             "chat_template_kwargs": {"enable_thinking": enable_thinking},
         }
 
@@ -109,7 +101,6 @@ class OpenAIProvider:
             "messages": conversation.to_openai(),
             "temperature": params.temperature,
             "top_p": params.top_p,
-            "presence_penalty": params.presence_penalty,
             "extra_body": extra_body,
             "stream": True,
         }

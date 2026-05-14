@@ -45,7 +45,7 @@ class Agent:
         self,
         conversation: Conversation,
         ctx: Context | None = None,
-        mode: str | SamplingParams = "instruct_coding",
+        mode: str | SamplingParams = "instruct",
         max_steps: int | None = None,
         tool_choice: str = "auto",
         **kwargs,

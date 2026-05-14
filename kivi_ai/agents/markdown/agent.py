@@ -38,7 +38,7 @@ class MarkdownAgent:
         self._conversation.add_user(user_message)
         ctx = Context(work_dir=work_dir)
         full_text = ""
-        for event in self._agent.run(self._conversation, ctx=ctx, mode="instruct_coding"):
+        for event in self._agent.run(self._conversation, ctx=ctx, mode="instruct"):
             if isinstance(event, TextDelta):
                 full_text += event.content
             elif isinstance(event, ErrorEvent):
@@ -91,7 +91,7 @@ def run_markdown_agent(
         console.print()
 
         try:
-            for event in agent.run(conversation, ctx=ctx, mode="instruct_coding"):
+            for event in agent.run(conversation, ctx=ctx, mode="instruct"):
                 if isinstance(event, TextDelta):
                     console.print(event.content, end="", markup=False, highlight=False)
                 elif isinstance(event, ThinkingDelta):
