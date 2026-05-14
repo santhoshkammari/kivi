@@ -182,15 +182,21 @@ async def chat_stream(request: Request):
         if not session:
             session_id = await mgr.create_session(provider=provider_name, model=model, title="Untitled")
 
-    # Convert raw messages to Message objects and store the new user message
+    # Convert raw messages to Message objects
     messages = [Message.from_dict(m) for m in raw_messages]
 
-    # Store the latest user message
+    # Store only the NEW user message (last one from frontend)
     if messages and messages[-1].role == Role.USER:
         await mgr.add_message(session_id, messages[-1])
 
     # Update session provider/model if changed
     await mgr.update_session(session_id, provider=provider_name, model=model)
+
+    # Build the authoritative message list from DB (source of truth)
+    # This ensures session reload works — all persisted messages are included
+    stored_messages = await mgr.get_messages(session_id)
+    if stored_messages:
+        messages = stored_messages
 
     # Check compaction before streaming
     use_vllm = provider_name.startswith("qwen-")
@@ -271,7 +277,7 @@ async def chat_stream(request: Request):
                 break
 
             # Execute each tool call
-            # First, add assistant message with tool calls to context
+            # First, add assistant message with tool calls to context and persist it
             assistant_tc_msg = Message(
                 role=Role.ASSISTANT,
                 content=round_content,
@@ -281,6 +287,7 @@ async def chat_stream(request: Request):
                 ],
             )
             current_messages.append(assistant_tc_msg)
+            await mgr.add_message(session_id, assistant_tc_msg)
 
             tool_results_for_msg: list[ToolResult] = []
             for tc in round_tool_calls:
@@ -310,17 +317,19 @@ async def chat_stream(request: Request):
                         is_error=True,
                     ))
 
-            # Add tool results as a message for next round
-            current_messages.append(Message(
+            # Add tool results as a message for next round and persist
+            tool_result_msg = Message(
                 role=Role.TOOL,
                 content="",
                 tool_results=tool_results_for_msg,
-            ))
+            )
+            current_messages.append(tool_result_msg)
+            await mgr.add_message(session_id, tool_result_msg)
 
             # Signal UI that model is processing tool results
             yield f"data: {json.dumps({'type': 'processing'})}\n\n"
 
-        # Store assistant response
+        # Store final assistant response (the text reply, not tool-call rounds)
         if full_content or full_thinking:
             assistant_msg = Message(
                 role=Role.ASSISTANT,
@@ -596,9 +605,16 @@ async def git_push(request: Request):
 
 # ── Serve frontend ───────────────────────────────────────────────────
 
+from fastapi.staticfiles import StaticFiles
+
+_frontend_dir = Path(__file__).parent / "frontend"
+app.mount("/static/css", StaticFiles(directory=str(_frontend_dir / "css")), name="static-css")
+app.mount("/static/js", StaticFiles(directory=str(_frontend_dir / "js")), name="static-js")
+
+
 @app.get("/")
 async def serve_index():
-    html_path = Path(__file__).parent / "frontend" / "index.html"
+    html_path = _frontend_dir / "index.html"
     if not html_path.exists():
         return HTMLResponse("<h1>Unified AI Chat</h1><p>Frontend not built yet.</p>")
     return HTMLResponse(html_path.read_text())

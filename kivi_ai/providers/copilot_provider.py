@@ -111,15 +111,26 @@ class CopilotProvider(BaseProvider):
         if use_vllm and self._vllm_url:
             model = await self._resolve_vllm_model(model)
 
-        # Extract last user prompt
-        prompt = ""
-        for m in reversed(messages):
+        # Build full conversation context for the Copilot session
+        # The SDK's session.send() only takes a single string, so we
+        # prepend conversation history as context
+        history_parts = []
+        last_user_prompt = ""
+        for m in messages:
             if m.role.value == "user":
-                prompt = m.content
-                break
-        if not prompt:
+                last_user_prompt = m.content if isinstance(m.content, str) else str(m.content)
+                history_parts.append(f"User: {last_user_prompt}")
+            elif m.role.value == "assistant" and m.content:
+                history_parts.append(f"Assistant: {m.content}")
+        if not last_user_prompt:
             yield StreamChunk(type=ChunkType.ERROR, content="No user message found")
             return
+
+        # If multi-turn, build a context-aware prompt
+        if len(history_parts) > 1:
+            prompt = "Conversation so far:\n" + "\n".join(history_parts[:-1]) + "\n\nUser: " + last_user_prompt
+        else:
+            prompt = last_user_prompt
 
         try:
             from copilot import ProviderConfig

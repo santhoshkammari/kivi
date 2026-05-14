@@ -53,4 +53,4 @@ where = ["."]
 include = ["kivi_ai*"]
 
 [tool.setuptools.package-data]
-kivi_ai = ["frontend/*.html"]
+kivi_ai = ["frontend/*.html", "frontend/css/*.css", "frontend/js/*.js"]

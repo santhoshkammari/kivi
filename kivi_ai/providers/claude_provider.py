@@ -44,15 +44,25 @@ class ClaudeProvider(BaseProvider):
     ) -> AsyncIterator[StreamChunk]:
         model = model or "haiku"
 
-        # Extract last user prompt
-        prompt = ""
-        for m in reversed(messages):
+        # Build full conversation context for Claude
+        # claude_agent_sdk's connect() takes a single prompt string, so we
+        # prepend conversation history as context for multi-turn support
+        history_parts = []
+        last_user_prompt = ""
+        for m in messages:
             if m.role.value == "user":
-                prompt = m.content
-                break
-        if not prompt:
+                last_user_prompt = m.content if isinstance(m.content, str) else str(m.content)
+                history_parts.append(f"User: {last_user_prompt}")
+            elif m.role.value == "assistant" and m.content:
+                history_parts.append(f"Assistant: {m.content}")
+        if not last_user_prompt:
             yield StreamChunk(type=ChunkType.ERROR, content="No user message found")
             return
+
+        if len(history_parts) > 1:
+            prompt = "Conversation so far:\n" + "\n".join(history_parts[:-1]) + "\n\nUser: " + last_user_prompt
+        else:
+            prompt = last_user_prompt
 
         client = None
         try:
