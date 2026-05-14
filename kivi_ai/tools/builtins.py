@@ -215,13 +215,16 @@ class WebSearchTool(ToolInterface):
 
 
 class WebFetchTool(ToolInterface):
-    """Fetch a URL and return its content as Markdown using Scrapling."""
+    """Fetch a URL, save as Markdown to ChromaDB, return doc_id."""
 
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="web_fetch",
-            description="Fetch a webpage and extract its content as Markdown",
+            description=(
+                "Fetch a webpage, convert to Markdown, and store it in ChromaDB. "
+                "Returns a doc_id you can pass to run_markdown_agent to query the content."
+            ),
             parameters=[
                 ToolParameter(name="url", type="string", description="URL to fetch", required=True),
             ],
@@ -235,44 +238,82 @@ class WebFetchTool(ToolInterface):
 
             result = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: Fetcher.get(
-                    url,
-                    timeout=30,
-                    retries=3,
-                    retry_delay=1,
-                    impersonate="chrome",
-                ),
+                lambda: Fetcher.get(url, timeout=30, retries=3, retry_delay=1, impersonate="chrome"),
             )
             content = list(
-                Convertor._extract_content(
-                    result,
-                    css_selector=None,
-                    extraction_type="markdown",
-                    main_content_only=True,
-                )
+                Convertor._extract_content(result, css_selector=None, extraction_type="markdown", main_content_only=True)
             )
             if not content or result.status != 200:
-                return ToolResult(
-                    tool_call_id="",
-                    content=f"[web_fetch error] Failed to fetch content (status {result.status})",
-                    is_error=True,
-                )
+                return ToolResult(tool_call_id="", content=f"[web_fetch error] status {result.status}", is_error=True)
+
             markdown = "".join(content)
-            return ToolResult(tool_call_id="", content=_truncate(markdown, 8000))
-        except ImportError:
+
+            # Ingest into ChromaDB
+            from ..agents.markdown.store import ingest_markdown
+            info = ingest_markdown(markdown, source_label=url)
+            doc_id = info["doc_id"]
+            chunks = info["chunks"]
+            preview = markdown[:300].replace("\n", " ")
+
             return ToolResult(
                 tool_call_id="",
-                content="[web_fetch] Install: pip install scrapling",
-                is_error=True,
+                content=(
+                    f"Fetched and stored: {url}\n"
+                    f"doc_id: {doc_id}\n"
+                    f"chunks: {chunks}\n"
+                    f"preview: {preview}...\n\n"
+                    f"Use run_markdown_agent(prompt, doc_id='{doc_id}') to query this content."
+                ),
             )
+        except ImportError:
+            return ToolResult(tool_call_id="", content="[web_fetch] Install: pip install scrapling", is_error=True)
         except Exception as e:
             return ToolResult(tool_call_id="", content=f"[web_fetch error] {e}", is_error=True)
+
+
+class RunMarkdownAgentTool(ToolInterface):
+    """Run the MarkdownAgent on a stored doc_id and return the answer."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="run_markdown_agent",
+            description=(
+                "Run the MarkdownAgent on a previously fetched/ingested document. "
+                "Pass the doc_id returned by web_fetch or md_ingest, and a natural language prompt. "
+                "The agent will surgically analyse the document and return a precise answer."
+            ),
+            parameters=[
+                ToolParameter(name="prompt", type="string", description="Question or task about the document", required=True),
+                ToolParameter(name="doc_id", type="string", description="doc_id from web_fetch or md_ingest", required=True),
+            ],
+        )
+
+    async def execute(self, arguments: dict[str, Any], *, work_dir: str = "") -> ToolResult:
+        prompt = arguments.get("prompt", "")
+        doc_id = arguments.get("doc_id", "")
+        try:
+            from ..agents.markdown.store import list_documents
+            from ..agents.markdown import MarkdownAgent
+
+            docs = list_documents()
+            match = next((d for d in docs if d["doc_id"] == doc_id), None)
+            if not match:
+                return ToolResult(tool_call_id="", content=f"[run_markdown_agent] doc_id '{doc_id}' not found. Run web_fetch first.", is_error=True)
+
+            # Pass only doc_id — agent loads text via tools (never sees full content)
+            agent = MarkdownAgent(base_url=os.environ.get("OPENAI_BASE_URL", "http://192.168.170.49:8077/v1"))
+            full_prompt = f"doc_id: {doc_id}  (source: {match['source']})\n\n{prompt}"
+            answer = await asyncio.get_event_loop().run_in_executor(None, lambda: agent.chat(full_prompt))
+            return ToolResult(tool_call_id="", content=answer)
+        except Exception as e:
+            return ToolResult(tool_call_id="", content=f"[run_markdown_agent error] {e}", is_error=True)
 
 
 # ── Registration helper ──────────────────────────────────────────────
 
 ALL_BUILTIN_TOOLS: list[type[ToolInterface]] = [
-    BashTool, ReadTool, WriteTool, EditTool, GlobTool, GrepTool, WebSearchTool, WebFetchTool,
+    BashTool, ReadTool, WriteTool, EditTool, GlobTool, GrepTool, WebSearchTool, WebFetchTool, RunMarkdownAgentTool,
 ]
 
 

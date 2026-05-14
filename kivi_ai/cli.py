@@ -49,9 +49,10 @@ def _cmd_cli(argv):
         from kivi_ai.agent.repl import _build_system_prompt, _make_kivi_tool, _process_turn_with_autocompact
         from rich.text import Text
 
+        from kivi_ai.agent.web_tools import web_tools
         base_url = os.environ.get("OPENAI_BASE_URL", "http://192.168.170.49:8077/v1")
         provider = OpenAIProvider(base_url=base_url)
-        registry = ToolRegistry(default_tools())
+        registry = ToolRegistry(default_tools() + web_tools())
         registry.register(_make_kivi_tool(base_url))
         conversation = Conversation(_build_system_prompt(registry))
         conversation.add_user(prompt_text)

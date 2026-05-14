@@ -210,8 +210,9 @@ def run_repl(work_dir: str, session_id: str | None = None, initial_history: list
     base_url = os.environ.get("OPENAI_BASE_URL", _DEFAULT_BASE_URL)
     session_id = session_id or new_session_id()
 
+    from .web_tools import web_tools
     provider = OpenAIProvider(base_url=base_url)
-    registry = ToolRegistry(default_tools())
+    registry = ToolRegistry(default_tools() + web_tools())
     registry.register(_make_kivi_tool(base_url))
 
     conversation = Conversation.from_openai(initial_history) if initial_history else Conversation()
