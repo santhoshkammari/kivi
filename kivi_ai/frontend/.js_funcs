@@ -1,0 +1,83 @@
+async function createSession
+async function gitDoCommit
+async function gitLoadRepo
+async function gitPush
+async function init
+async function _loadHistory
+async function loadModelsForProvider
+async function loadSessions
+async function loadTokenStats
+async function refreshTokenStats
+async function renderChatsDashboard
+async function selectModel
+async function sendMessage
+async function setMode
+async function streamUnified
+async function switchToChat
+async function syncCurrentSessionConfig
+async function updateModelSelectors
+function _acceptGhostText
+function appendAssistantMessage
+function appendUserMessage
+function autoResize
+function closeSettings
+function copyCode
+function createAssistantMessageEl
+function deleteChat
+function esc
+function filterChatList
+function filterChatsDashboard
+function for
+function formatTokenCount
+function _getGhostOverlay
+function getSession
+function _getSuggestDropdown
+function gitCommitPrompt
+function gitRefresh
+function gitSearchDirs
+function gitSelectRepo
+function handleFileUpload
+function _handleHistoryNav
+function _handleInput
+function hideChatsDashboard
+function _hideGhostText
+function hideGitDashboard
+function _hideSuggestions
+function hideTokenDashboard
+function msgActionButtons
+function _navigateSuggestion
+function newChat
+function openSettings
+function removeFile
+function renderChatList
+function renderFileChips
+function renderGitCommitLog
+function renderGitDiff
+function renderGitRecents
+function renderLatex
+function renderMarkdown
+function renderMessages
+function renderTokenDashboard
+function renderToolBlock
+function _saveSessionMode
+function scrollToBottom
+function _selectSuggestion
+function sendQuickAction
+function _sentenceTrieInsert
+function _sentenceTrieSearch
+function setSamplingMode
+function setTheme
+function setTokenPeriod
+function showChatsDashboard
+function _showGhostText
+function showGitDashboard
+function _showSuggestions
+function showToast
+function showTokenDashboard
+function stopGeneration
+function _timeAgo
+function toggleCollapse
+function toggleSidebar
+function triggerUpload
+function updateSamplingDisplay
+function updateSendButton
