@@ -19,7 +19,7 @@ conv.add_user(
     "What Python version is installed? Also show me the top 5 largest files in /tmp."
 )
 
-for event in agent.run(conv, mode="instruct_coding"):
+for event in agent.run(conv, mode="instruct"):
     if isinstance(event, ToolCallStart):
         print(f"\n→ calling {event.tool_name}({event.arguments[:80]})")
     elif isinstance(event, ToolCallComplete):

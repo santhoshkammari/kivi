@@ -18,8 +18,6 @@ import requests
 from bs4 import BeautifulSoup
 from .custom_markdownify import custom_markdownify as md
 
-# Configuration du logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # =============================================================================

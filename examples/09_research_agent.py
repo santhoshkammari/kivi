@@ -62,7 +62,7 @@ conv.add_user(
 )
 
 print("=" * 60)
-for event in agent.run(conv, ctx=Context(), mode="instruct_coding"):
+for event in agent.run(conv, ctx=Context(), mode="instruct"):
     if isinstance(event, ToolCallStart):
         print(f"\n[{event.tool_name}] {event.arguments[:120]}")
     elif isinstance(event, ToolCallComplete):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import difflib
+import fnmatch
 import os
 import subprocess
 from dataclasses import dataclass
@@ -13,7 +14,7 @@ from .context import Context
 __all__ = [
     "ToolInfo", "ToolRequest", "ToolResponse", "Tool", "ToolRegistry",
     "BashTool", "ReadTool", "WriteTool", "EditTool", "GlobTool", "GrepTool",
-    "default_tools",
+    "FinalAnswerTool", "default_tools", "filter_tools",
 ]
 
 _OUTPUT_LIMIT = 8000
@@ -82,7 +83,7 @@ class BashTool(_BaseTool):
 
     def info(self) -> ToolInfo:
         return ToolInfo(
-            name="bash",
+            name="shell_bash",
             description="Execute a shell command and return stdout+stderr.",
             parameters={
                 "type": "object",
@@ -113,15 +114,15 @@ class BashTool(_BaseTool):
         except subprocess.TimeoutExpired as exc:
             partial = ((exc.stdout or "") + (exc.stderr or "")).strip() if exc.stdout or exc.stderr else ""
             msg = f"timed out ({request.arguments.get('timeout', self.timeout)}s)"
-            return ToolResponse(_truncate(f"[bash error] {msg}\n{partial}".strip()), is_error=True)
+            return ToolResponse(_truncate(f"[shell_bash error] {msg}\n{partial}".strip()), is_error=True)
         except Exception as exc:
-            return self._fail("bash", exc)
+            return self._fail("shell_bash", exc)
 
 
 class ReadTool(_BaseTool):
     def info(self) -> ToolInfo:
         return ToolInfo(
-            name="read",
+            name="file_read",
             description="Read a file and return its contents.",
             parameters={
                 "type": "object",
@@ -137,13 +138,13 @@ class ReadTool(_BaseTool):
             content = path.read_text()
             return ToolResponse(_truncate(content))
         except Exception as exc:
-            return self._fail("read", exc)
+            return self._fail("file_read", exc)
 
 
 class WriteTool(_BaseTool):
     def info(self) -> ToolInfo:
         return ToolInfo(
-            name="write",
+            name="file_write",
             description="Write content to a file, creating parent directories.",
             parameters={
                 "type": "object",
@@ -164,13 +165,13 @@ class WriteTool(_BaseTool):
             path.write_text(content)
             return ToolResponse(f"[wrote {len(content.encode())} bytes to {_display_path(path, ctx)}]")
         except Exception as exc:
-            return self._fail("write", exc)
+            return self._fail("file_write", exc)
 
 
 class EditTool(_BaseTool):
     def info(self) -> ToolInfo:
         return ToolInfo(
-            name="edit",
+            name="file_edit",
             description="Replace the first occurrence of old_string with new_string in a file.",
             parameters={
                 "type": "object",
@@ -191,7 +192,7 @@ class EditTool(_BaseTool):
             new = str(request.arguments["new_string"])
             original = path.read_text()
             if old not in original:
-                return ToolResponse(f"[edit error] old_string not found in {_display_path(path, ctx)}", is_error=True)
+                return ToolResponse(f"[file_edit error] old_string not found in {_display_path(path, ctx)}", is_error=True)
             updated = original.replace(old, new, 1)
             path.write_text(updated)
             diff = "".join(difflib.unified_diff(
@@ -200,13 +201,13 @@ class EditTool(_BaseTool):
             ))
             return ToolResponse(diff or "[no changes]")
         except Exception as exc:
-            return self._fail("edit", exc)
+            return self._fail("file_edit", exc)
 
 
 class GlobTool(_BaseTool):
     def info(self) -> ToolInfo:
         return ToolInfo(
-            name="glob",
+            name="file_glob",
             description="Find files matching a glob pattern under the working directory.",
             parameters={
                 "type": "object",
@@ -222,7 +223,7 @@ class GlobTool(_BaseTool):
             matches = sorted(str(p.relative_to(root)) for p in root.glob(request.arguments["pattern"]) if p.is_file())
             return ToolResponse("\n".join(matches[:200]) if matches else "[glob] no matches")
         except Exception as exc:
-            return self._fail("glob", exc)
+            return self._fail("file_glob", exc)
 
 
 class GrepTool(_BaseTool):
@@ -230,7 +231,7 @@ class GrepTool(_BaseTool):
 
     def info(self) -> ToolInfo:
         return ToolInfo(
-            name="grep",
+            name="file_grep",
             description="Search for a regex pattern in files using grep -rn.",
             parameters={
                 "type": "object",
@@ -254,12 +255,12 @@ class GrepTool(_BaseTool):
             ctx.check()
             output = ((result.stdout or "") + (result.stderr or "")).strip()
             if result.returncode == 1 and not output:
-                return ToolResponse("[grep] no matches")
+                return ToolResponse("[file_grep] no matches")
             return ToolResponse(_truncate(output) if output else "[no output]", is_error=result.returncode not in (0, 1))
         except subprocess.TimeoutExpired:
-            return ToolResponse("[grep error] timed out", is_error=True)
+            return ToolResponse("[file_grep error] timed out", is_error=True)
         except Exception as exc:
-            return self._fail("grep", exc)
+            return self._fail("file_grep", exc)
 
 
 # ── Registry ──────────────────────────────────────────────────────────
@@ -299,5 +300,38 @@ class ToolRegistry:
         return len(self._tools)
 
 
+class FinalAnswerTool(_BaseTool):
+    """Escape hatch when tool_choice=required — agent calls this to return its final answer."""
+
+    def info(self) -> ToolInfo:
+        return ToolInfo(
+            name="final_answer",
+            description="Call this when you have completed all work and are ready to return the final answer to the user.",
+            parameters={
+                "type": "object",
+                "properties": {"answer": {"type": "string", "description": "The final answer or summary to return."}},
+                "required": ["answer"],
+            },
+        )
+
+    def run(self, ctx: Context, request: ToolRequest) -> ToolResponse:
+        return ToolResponse(str(request.arguments.get("answer", "")))
+
+
+def filter_tools(tools: list[Tool], patterns: list[str]) -> list[Tool]:
+    """Filter tools by name glob patterns, e.g. ['file_*', 'shell_bash']."""
+    result = []
+    for tool in tools:
+        name = tool.info().name
+        if any(fnmatch.fnmatch(name, p) for p in patterns):
+            result.append(tool)
+    return result
+
+
 def default_tools() -> list[Tool]:
     return [BashTool(), ReadTool(), WriteTool(), EditTool(), GlobTool(), GrepTool()]
+
+
+def all_tools() -> list[Tool]:
+    from .web_tools import web_tools
+    return default_tools() + web_tools()

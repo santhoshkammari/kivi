@@ -44,7 +44,7 @@ agent = Agent(tools=ToolRegistry(tools))
 conv = Conversation("You are a web research agent. Search, fetch pages (get doc_ids), and report findings.")
 conv.add_user("What is the latest stable Python version? Search for it and fetch the python.org downloads page.")
 
-for event in agent.run(conv, mode="instruct_coding"):
+for event in agent.run(conv, mode="instruct"):
     if isinstance(event, ToolCallStart):
         print(f"\n→ {event.tool_name}({event.arguments[:100]})")
     elif isinstance(event, ToolCallComplete):

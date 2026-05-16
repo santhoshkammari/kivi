@@ -26,7 +26,7 @@ for user_msg in turns:
     print("[assistant] ", end="")
     conv.add_user(user_msg)
 
-    for event in agent.run(conv, mode="instruct_general"):
+    for event in agent.run(conv, mode="instruct"):
         if isinstance(event, ThinkingDelta):
             pass  # thinking is internal — skip printing
         elif isinstance(event, TextDelta):

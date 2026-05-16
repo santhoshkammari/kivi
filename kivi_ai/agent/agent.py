@@ -16,7 +16,7 @@ from .provider import (
     ContentDelta, OpenAIProvider, SamplingParams, StreamComplete,
     ThinkingDelta as ProvThinkingDelta, ToolCallDelta, is_thinking_mode, resolve_mode,
 )
-from .tools import Tool, ToolInfo, ToolRegistry, ToolRequest, ToolResponse, default_tools
+from .tools import FinalAnswerTool, Tool, ToolInfo, ToolRegistry, ToolRequest, ToolResponse, default_tools, filter_tools
 
 __all__ = ["Agent"]
 
@@ -33,10 +33,18 @@ class Agent:
         self,
         provider: OpenAIProvider | None = None,
         tools: list[Tool] | ToolRegistry | None = None,
+        tool_names: list[str] | None = None,
         name: str = "kivi",
+        force_tool_use: bool = False,
     ):
         resolved = default_tools() if tools is None else tools
+        if not isinstance(resolved, ToolRegistry):
+            if tool_names is not None:
+                resolved = filter_tools(resolved, tool_names)
+            if force_tool_use and not any(isinstance(t, FinalAnswerTool) for t in resolved):
+                resolved = list(resolved) + [FinalAnswerTool()]
         self._registry = resolved if isinstance(resolved, ToolRegistry) else ToolRegistry(resolved)
+        self._force_tool_use = force_tool_use
         self.name = name
         self._provider = provider or OpenAIProvider()
         self._ctx: Context | None = None
@@ -55,6 +63,7 @@ class Agent:
         params = resolve_mode(mode)
         mode_name = mode if isinstance(mode, str) else ""
         tool_schemas = self._registry.schemas()
+        effective_tool_choice = "required" if self._force_tool_use else tool_choice
         step = retries = total_tool_calls = 0
         started = time.monotonic()
         self._ctx = ctx
@@ -73,7 +82,7 @@ class Agent:
 
                 call_kwargs = dict(kwargs)
                 if tool_schemas:
-                    call_kwargs.setdefault("tool_choice", tool_choice)
+                    call_kwargs.setdefault("tool_choice", effective_tool_choice)
                 else:
                     call_kwargs.pop("tool_choice", None)
 
@@ -108,6 +117,21 @@ class Agent:
                 stop_reason = finish_reason or ("tool_use" if tool_calls else "end_turn")
 
                 if tool_calls:
+                    # Intercept final_answer — emit as text and stop
+                    final_calls = [c for c in tool_calls if c.tool_name == "final_answer"]
+                    if final_calls:
+                        import json as _json
+                        try:
+                            answer = _json.loads(final_calls[0].arguments).get("answer", "")
+                        except Exception:
+                            answer = final_calls[0].arguments
+                        if answer:
+                            yield TextDelta(answer)
+                        conversation.add_assistant(answer)
+                        yield StepComplete(step=step, text=answer, tool_calls=0, stop_reason="end_turn")
+                        yield AgentDone(step, answer, total_tool_calls, round(time.monotonic() - started, 3))
+                        return
+
                     parts = ([TextPart(assistant_text)] if assistant_text else []) + tool_calls
                     conversation._append(Message(role=Role.ASSISTANT, parts=parts))
                     for call in tool_calls:
@@ -119,6 +143,16 @@ class Agent:
                         yield ToolCallComplete(call.tool_name, call.tool_id, call.arguments, response.content, response.is_error)
                     total_tool_calls += len(tool_calls)
                     yield StepComplete(step=step, text=assistant_text, tool_calls=len(tool_calls), stop_reason=stop_reason)
+                    # If every call was "unknown tool", inject valid tool names so model self-corrects
+                    all_unknown = all(
+                        r.is_error and "unknown tool" in r.content
+                        for r in results
+                    )
+                    if all_unknown:
+                        valid = ", ".join(s["function"]["name"] for s in tool_schemas)
+                        conversation.add_user(
+                            f"Those tool names don't exist. Valid tools: {valid}. Use the exact names."
+                        )
                     continue
 
                 conversation.add_assistant(assistant_text)

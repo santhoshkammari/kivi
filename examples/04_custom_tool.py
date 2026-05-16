@@ -48,7 +48,7 @@ agent = Agent(tools=registry)
 conv = Conversation()
 conv.add_user("Are 17, 18, 97, and 100 prime numbers? Check each one.")
 
-for event in agent.run(conv, mode="instruct_coding"):
+for event in agent.run(conv, mode="instruct"):
     if isinstance(event, ToolCallStart):
         print(f"\n→ is_prime({event.arguments})")
     elif isinstance(event, ToolCallComplete):

@@ -1,7 +1,7 @@
 """10_thinking_mode.py — Extended reasoning / thinking mode.
 
 Shows:
-- thinking_coding mode for hard problems (vLLM models that support it)
+- thinking mode for hard problems (vLLM models that support it)
 - Displaying thinking blocks vs final answer separately
 - ThinkingComplete event carrying the full reasoning trace
 """
@@ -23,7 +23,7 @@ conv.add_user(
 thinking_buf = []
 print("[ thinking... ]")
 
-for event in agent.run(conv, mode="thinking_coding"):
+for event in agent.run(conv, mode="thinking"):
     if isinstance(event, ThinkingDelta):
         thinking_buf.append(event.content)
         print(".", end="", flush=True)

@@ -34,7 +34,7 @@ conv.add_user(
     "Then summarise the answer in one sentence."
 )
 
-for event in orchestrator.run(conv, mode="instruct_coding"):
+for event in orchestrator.run(conv, mode="instruct"):
     if isinstance(event, ToolCallStart):
         print(f"\n→ [{event.tool_name}] {event.arguments[:100]}")
     elif isinstance(event, ToolCallComplete):

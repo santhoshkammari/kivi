@@ -16,7 +16,7 @@ agent = Agent()
 conv = Conversation()
 conv.add_user("What is 17 * 43? Just give the number.")
 
-for event in agent.run(conv, mode="instruct_coding"):
+for event in agent.run(conv, mode="instruct"):
     if isinstance(event, TextDelta):
         print(event.content, end="", flush=True)
     elif isinstance(event, AgentDone):
