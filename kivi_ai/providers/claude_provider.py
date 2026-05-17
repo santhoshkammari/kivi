@@ -105,6 +105,8 @@ class ClaudeProvider(BaseProvider):
 
             total_cost = 0.0
             num_turns = 0
+            # Track tool_call_ids that have been emitted via StreamEvent to avoid duplicates
+            seen_tool_starts: set[str] = set()
 
             async for msg in client.receive_messages():
                 if isinstance(msg, StreamEvent):
@@ -130,26 +132,30 @@ class ClaudeProvider(BaseProvider):
                     elif etype == "content_block_start":
                         cb = evt.get("content_block", {})
                         if cb.get("type") == "tool_use":
+                            tc_id = cb.get("id", "")
+                            seen_tool_starts.add(tc_id)
                             yield StreamChunk(
                                 type=ChunkType.TOOL_START,
                                 metadata={
-                                    "tool_call_id": cb.get("id", ""),
+                                    "tool_call_id": tc_id,
                                     "name": cb.get("name", ""),
                                 },
                             )
 
                 elif isinstance(msg, AssistantMessage):
-                    # Process complete message blocks
+                    # Process complete message blocks (skip tools already streamed)
                     for block in msg.content:
                         if isinstance(block, ToolUseBlock):
-                            yield StreamChunk(
-                                type=ChunkType.TOOL_START,
-                                metadata={
-                                    "tool_call_id": block.id,
-                                    "name": block.name,
-                                    "arguments": block.input,
-                                },
-                            )
+                            if block.id not in seen_tool_starts:
+                                seen_tool_starts.add(block.id)
+                                yield StreamChunk(
+                                    type=ChunkType.TOOL_START,
+                                    metadata={
+                                        "tool_call_id": block.id,
+                                        "name": block.name,
+                                        "arguments": block.input,
+                                    },
+                                )
                         elif isinstance(block, ToolResultBlock):
                             rc = block.content
                             if isinstance(rc, list):
@@ -165,14 +171,16 @@ class ClaudeProvider(BaseProvider):
                                 },
                             )
                         elif ServerToolUseBlock and isinstance(block, ServerToolUseBlock):
-                            yield StreamChunk(
-                                type=ChunkType.TOOL_START,
-                                metadata={
-                                    "tool_call_id": block.id,
-                                    "name": block.name,
-                                    "arguments": block.input,
-                                },
-                            )
+                            if block.id not in seen_tool_starts:
+                                seen_tool_starts.add(block.id)
+                                yield StreamChunk(
+                                    type=ChunkType.TOOL_START,
+                                    metadata={
+                                        "tool_call_id": block.id,
+                                        "name": block.name,
+                                        "arguments": block.input,
+                                    },
+                                )
                         elif ServerToolResultBlock and isinstance(block, ServerToolResultBlock):
                             rc = block.content
                             if isinstance(rc, dict):

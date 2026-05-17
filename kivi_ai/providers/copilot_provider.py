@@ -134,6 +134,7 @@ class CopilotProvider(BaseProvider):
 
         try:
             from copilot import ProviderConfig
+            from copilot.session import PermissionHandler
 
             provider = None
             if use_vllm and self._vllm_url:
@@ -144,7 +145,7 @@ class CopilotProvider(BaseProvider):
                 )
 
             session = await client.create_session(
-                on_permission_request=lambda *a, **k: True,
+                on_permission_request=PermissionHandler.approve_all,
                 model=model,
                 provider=provider,
                 streaming=True,
@@ -164,7 +165,8 @@ class CopilotProvider(BaseProvider):
                     content = evt.data.content if hasattr(evt.data, "content") else ""
                     reasoning = evt.data.reasoning_text if hasattr(evt.data, "reasoning_text") else None
                     collected.append(("message", content, reasoning))
-                elif t == "assistant.turn_end":
+                elif t == "session.idle":
+                    # session.idle fires when all turns (including tool round-trips) are complete
                     done_event.set()
                 elif t == "tool.execution_start":
                     d = evt.data
@@ -203,10 +205,10 @@ class CopilotProvider(BaseProvider):
             # Stream events as they arrive
             sent_idx = 0
             had_deltas = False
-            timeout_at = asyncio.get_event_loop().time() + 120
+            timeout_at = asyncio.get_event_loop().time() + 180
             while not done_event.is_set():
                 if asyncio.get_event_loop().time() > timeout_at:
-                    yield StreamChunk(type=ChunkType.ERROR, content="Timeout after 120s")
+                    yield StreamChunk(type=ChunkType.ERROR, content="Timeout after 180s")
                     break
                 await asyncio.sleep(0.03)
                 while sent_idx < len(collected):
