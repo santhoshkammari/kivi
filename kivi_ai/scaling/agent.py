@@ -53,7 +53,7 @@ CRITICAL: After completing work for a todo, you MUST call mark_done(todo_id=<id>
 Failure to call mark_done means the todo will be retried forever. Always mark every todo."""
 
 
-def _build_messages(task_id: int, session_id: int) -> list[Message]:
+def _build_messages(task_id: int, session_id: int, work_dir: str) -> list[Message]:
     state = db.get_state(task_id)
     todos = db.pick_todos(session_id, task_id, n=state["max_parallel"])
 
@@ -67,11 +67,12 @@ def _build_messages(task_id: int, session_id: int) -> list[Message]:
         state_text = (
             f"<state>\n"
             f"goal: {state['goal']}\n"
+            f"work_dir: {work_dir}\n"
             f"progress: {state['progress']} done, {state['pending']} pending\n"
             f"your batch:\n{todos_text}\n"
             f"</state>"
         )
-        content = f"{state_text}\n\nWork on your batch. Mark each todo done or failed."
+        content = f"{state_text}\n\nWork on your batch. Write all files under work_dir. Mark each todo done or failed."
 
     return [Message(role=Role.USER, parts=[TextPart(content)])]
 
@@ -123,9 +124,11 @@ class MarkFailedTool:
 
 # ── Session runner ────────────────────────────────────────────────────
 
-def run_session(task_id: int) -> dict:
+def run_session(task_id: int, work_dir: str = ".") -> dict:
     """Run one session: pick a batch, execute, mark results. Returns state."""
     import time
+    from pathlib import Path as _Path
+    work_dir = str(_Path(work_dir).resolve())
     db.DB_PATH = DB_PATH
 
     session_id = db.session_start(task_id)
@@ -135,7 +138,7 @@ def run_session(task_id: int) -> dict:
         db.session_end(session_id, [])
         return state
 
-    messages = _build_messages(task_id, session_id)
+    messages = _build_messages(task_id, session_id, work_dir)
     picked_todos = [
         t for t in db.get_todos(task_id, status="picked")
         if t.get("session_id") == session_id
@@ -157,7 +160,7 @@ def run_session(task_id: int) -> dict:
     conv = Conversation(system_prompt=SOUL)
     for msg in messages:
         conv._messages.append(msg)
-    ctx = Context()
+    ctx = Context(work_dir=work_dir)
 
     from ..agent.events import AgentDone, StepComplete, TextDelta, ToolCallStart, ToolCallComplete
 
@@ -264,8 +267,10 @@ def _plan_todos(provider: OpenAIProvider, goal: str) -> list[str]:
     if os.path.exists(plan_file):
         os.remove(plan_file)
 
-    for event in agent.run(conv, mode="instruct", max_steps=6):
-        pass  # just let it run
+    from ..agent.events import ToolCallComplete as _TCC
+    for event in agent.run(conv, mode="instruct", max_steps=6, tool_choice="required"):
+        if isinstance(event, _TCC) and os.path.exists(plan_file):
+            break  # plan written — stop immediately
 
     if not os.path.exists(plan_file):
         raise RuntimeError("Planner did not write /tmp/_kivi_plan.json")
@@ -283,10 +288,14 @@ def _plan_todos(provider: OpenAIProvider, goal: str) -> list[str]:
 
 # ── Single-call entry point ───────────────────────────────────────────
 
-def plan_and_run(goal: str, max_parallel: int = 4) -> dict:
+def plan_and_run(goal: str, max_parallel: int = 4, work_dir: str = ".") -> dict:
     """Decompose goal into todos via LLM planner, then run sessions until all done."""
+    from pathlib import Path as _Path
+    work_dir = str(_Path(work_dir).resolve())
+
     log.info("━━ Planning ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     log.info("  goal: %s", goal)
+    log.info("  work_dir: %s", work_dir)
     provider = OpenAIProvider()
     todos = _plan_todos(provider, goal)
     log.info("  plan: %d todos (batch_size=%d)", len(todos), max_parallel)
@@ -297,7 +306,7 @@ def plan_and_run(goal: str, max_parallel: int = 4) -> dict:
     log.info("  task_id=%d created\n", task_id)
 
     while True:
-        state = run_session(task_id)
+        state = run_session(task_id, work_dir=work_dir)
         if state["all_done"]:
             break
 

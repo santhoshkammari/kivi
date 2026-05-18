@@ -149,9 +149,7 @@ class OpenAIProvider:
                         arguments_delta=getattr(fn, "arguments", "") if not isinstance(fn, dict) else fn.get("arguments", ""),
                     )
         finally:
-            close = getattr(response, "close", None)
-            if callable(close):
-                close()
+            response.close()
 
         for event in parser.flush():
             yield event

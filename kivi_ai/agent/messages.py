@@ -64,9 +64,10 @@ class Message:
             part = next(p for p in self.parts if isinstance(p, ToolResultPart))
             return {"role": "tool", "tool_call_id": part.tool_call_id, "content": part.content}
         if self.role is Role.ASSISTANT and self.has_tool_calls:
+            text = self.text.strip() or None
             return {
                 "role": "assistant",
-                "content": self.text,
+                "content": text,
                 "tool_calls": [
                     {"id": tc.tool_id, "type": "function", "function": {"name": tc.tool_name, "arguments": tc.arguments}}
                     for tc in self.tool_calls

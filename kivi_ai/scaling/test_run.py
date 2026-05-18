@@ -9,8 +9,12 @@ from kivi_ai.scaling.agent import setup_logging
 
 setup_logging()
 
+goal  = "Search openai news only today, read neatly and get importnat tables and also cite exactly and wreite to task_openai folder a md file"
+work_dir = "."
+
 state = plan_and_run(
-    input("Task: "),
+    goal,
     max_parallel=3,
+    work_dir=work_dir,
 )
 print(f"\nFinal: {state['progress']} done, {state['failed']} failed, all_done={state['all_done']}")

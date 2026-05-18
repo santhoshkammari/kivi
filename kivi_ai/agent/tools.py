@@ -220,7 +220,11 @@ class GlobTool(_BaseTool):
         try:
             ctx.check()
             root = Path(ctx.work_dir)
-            matches = sorted(str(p.relative_to(root)) for p in root.glob(request.arguments["pattern"]) if p.is_file())
+            pattern = request.arguments["pattern"]
+            # strip leading slash — absolute patterns are not supported by pathlib glob
+            if pattern.startswith("/"):
+                pattern = pattern.lstrip("/")
+            matches = sorted(str(p.relative_to(root)) for p in root.glob(pattern) if p.is_file())
             return ToolResponse("\n".join(matches[:200]) if matches else "[glob] no matches")
         except Exception as exc:
             return self._fail("file_glob", exc)

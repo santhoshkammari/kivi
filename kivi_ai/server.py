@@ -255,13 +255,14 @@ async def chat_stream(request: Request):
             yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
 
         # Tool execution loop — keeps going until model produces text (no tool calls)
-            MAX_TOOL_ROUNDS = 250
             current_messages = list(messages_to_send)
             full_content = ""
             full_thinking = ""
             stream_meta: dict[str, Any] = {}
+            tool_round = 0
 
-            for tool_round in range(MAX_TOOL_ROUNDS):
+            while True:
+                tool_round += 1
                 round_content = ""
                 round_thinking = ""
                 round_tool_calls: list[dict] = []
