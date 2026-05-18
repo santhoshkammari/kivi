@@ -713,3 +713,13 @@
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 4px; }
+
+    /* Agent pulse animation */
+    .agent-pulse {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--green);
+      animation: agent-pulse-anim 1.5s ease-in-out infinite;
+    }
+    @keyframes agent-pulse-anim {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.7); }
+    }

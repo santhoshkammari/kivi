@@ -55,6 +55,10 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 _session_manager: SessionManager | None = None
 _kivi_md: str = ""
 
+# Active agent/streaming sessions tracker
+# { session_id: { provider, model, mode, start_time, status, tool_count, last_event } }
+_active_agents: dict[str, dict[str, Any]] = {}
+
 
 def _load_kivi_md() -> str:
     global _kivi_md
@@ -212,145 +216,179 @@ async def chat_stream(request: Request):
     logger.debug(f"REQUEST mode={mode} provider={provider_name} model={model} tools={[t.name for t in tool_schemas] if tool_schemas else None} enable_thinking={enable_thinking}")
 
     async def generate():
-        # Compaction check
-        compaction_chunk = await check_and_compact(session_id, mgr, provider, model)
-        if compaction_chunk:
-            yield f"data: {json.dumps(compaction_chunk.to_sse_dict())}\n\n"
-            # Reload messages after compaction
-            stored = await mgr.get_messages(session_id)
-            messages_to_send = stored
-        else:
-            messages_to_send = messages
+        # Register as active agent
+        _active_agents[session_id] = {
+            "provider": provider_name,
+            "model": model,
+            "mode": mode,
+            "start_time": time.time(),
+            "status": "running",
+            "tool_count": 0,
+            "last_event": time.time(),
+            "title": "",
+        }
+        # Get title from session or first message
+        try:
+            s = await mgr.get_session(session_id)
+            if s:
+                _active_agents[session_id]["title"] = s.get("title", "")
+        except Exception:
+            pass
+        if not _active_agents[session_id]["title"] and raw_messages:
+            for m in raw_messages:
+                if m.get("role") == "user":
+                    _active_agents[session_id]["title"] = m.get("content", "")[:60]
+                    break
 
-        # Emit session_id for the frontend
-        yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
+        try:
+            # Compaction check
+            compaction_chunk = await check_and_compact(session_id, mgr, provider, model)
+            if compaction_chunk:
+                yield f"data: {json.dumps(compaction_chunk.to_sse_dict())}\n\n"
+                # Reload messages after compaction
+                stored = await mgr.get_messages(session_id)
+                messages_to_send = stored
+            else:
+                messages_to_send = messages
+
+            # Emit session_id for the frontend
+            yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
 
         # Tool execution loop — keeps going until model produces text (no tool calls)
-        MAX_TOOL_ROUNDS = 250
-        current_messages = list(messages_to_send)
-        full_content = ""
-        full_thinking = ""
-        stream_meta: dict[str, Any] = {}
+            MAX_TOOL_ROUNDS = 250
+            current_messages = list(messages_to_send)
+            full_content = ""
+            full_thinking = ""
+            stream_meta: dict[str, Any] = {}
 
-        for tool_round in range(MAX_TOOL_ROUNDS):
-            round_content = ""
-            round_thinking = ""
-            round_tool_calls: list[dict] = []
-            logger.debug(f"ROUND {tool_round} starting, messages={len(current_messages)}")
+            for tool_round in range(MAX_TOOL_ROUNDS):
+                round_content = ""
+                round_thinking = ""
+                round_tool_calls: list[dict] = []
+                logger.debug(f"ROUND {tool_round} starting, messages={len(current_messages)}")
 
-            try:
-                raw_stream = provider.stream(
-                    current_messages, model,
-                    tools=tool_schemas,
-                    system_prompt=system_prompt,
-                    temperature=temperature,
-                    top_p=top_p,
-                    top_k=top_k,
-                    presence_penalty=presence_penalty,
-                    repetition_penalty=repetition_penalty,
-                    enable_thinking=enable_thinking,
-                    use_vllm=use_vllm,
-                )
-                async for chunk in normalize_stream(raw_stream):
-                    if chunk.type == ChunkType.DELTA:
-                        round_content += chunk.content
-                    elif chunk.type == ChunkType.THINKING_DELTA:
-                        round_thinking += chunk.content
-                    elif chunk.type == ChunkType.DONE:
-                        stream_meta = chunk.metadata
-                        round_tool_calls = stream_meta.get("tool_calls", [])
-                        logger.debug(f"ROUND {tool_round} DONE: tool_calls={[tc['name'] for tc in round_tool_calls]} content_len={len(round_content)} thinking_len={len(round_thinking)}")
-                        continue
-                    elif chunk.type == ChunkType.TOOL_START:
-                        logger.debug(f"ROUND {tool_round} TOOL_START: {chunk.metadata}")
-                    yield f"data: {json.dumps(chunk.to_sse_dict())}\n\n"
-            except Exception as e:
-                yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
-
-            full_content += round_content
-            full_thinking += round_thinking
-
-            # If no tool calls, we're done
-            if not round_tool_calls:
-                break
-
-            # Execute each tool call
-            # First, add assistant message with tool calls to context and persist it
-            assistant_tc_msg = Message(
-                role=Role.ASSISTANT,
-                content=round_content,
-                tool_calls=[
-                    ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
-                    for tc in round_tool_calls
-                ],
-            )
-            current_messages.append(assistant_tc_msg)
-            await mgr.add_message(session_id, assistant_tc_msg)
-
-            tool_results_for_msg: list[ToolResult] = []
-            for tc in round_tool_calls:
-                tool_name = tc["name"]
-                tool_args = tc["arguments"]
-                tool_call_id = tc["id"]
-
-                # Execute the tool
                 try:
-                    tool_impl = Registry.get_tool(tool_name)
-                    result = await tool_impl.execute(tool_args, work_dir=WORK_DIR)
-
-                    # Emit tool_complete event
-                    yield f"data: {json.dumps({'type': 'tool_complete', 'tool_call_id': tool_call_id, 'name': tool_name, 'result': result.content, 'is_error': result.is_error})}\n\n"
-
-                    tool_results_for_msg.append(ToolResult(
-                        tool_call_id=tool_call_id,
-                        content=result.content,
-                        is_error=result.is_error,
-                    ))
+                    raw_stream = provider.stream(
+                        current_messages, model,
+                        tools=tool_schemas,
+                        system_prompt=system_prompt,
+                        temperature=temperature,
+                        top_p=top_p,
+                        top_k=top_k,
+                        presence_penalty=presence_penalty,
+                        repetition_penalty=repetition_penalty,
+                        enable_thinking=enable_thinking,
+                        use_vllm=use_vllm,
+                    )
+                    async for chunk in normalize_stream(raw_stream):
+                        if chunk.type == ChunkType.DELTA:
+                            round_content += chunk.content
+                        elif chunk.type == ChunkType.THINKING_DELTA:
+                            round_thinking += chunk.content
+                        elif chunk.type == ChunkType.DONE:
+                            stream_meta = chunk.metadata
+                            round_tool_calls = stream_meta.get("tool_calls", [])
+                            logger.debug(f"ROUND {tool_round} DONE: tool_calls={[tc['name'] for tc in round_tool_calls]} content_len={len(round_content)} thinking_len={len(round_thinking)}")
+                            continue
+                        elif chunk.type == ChunkType.TOOL_START:
+                            logger.debug(f"ROUND {tool_round} TOOL_START: {chunk.metadata}")
+                            if session_id in _active_agents:
+                                _active_agents[session_id]["tool_count"] += 1
+                                _active_agents[session_id]["last_event"] = time.time()
+                        yield f"data: {json.dumps(chunk.to_sse_dict())}\n\n"
                 except Exception as e:
-                    error_msg = f"Tool '{tool_name}' failed: {str(e)}"
-                    yield f"data: {json.dumps({'type': 'tool_complete', 'tool_call_id': tool_call_id, 'name': tool_name, 'result': error_msg, 'is_error': True})}\n\n"
-                    tool_results_for_msg.append(ToolResult(
-                        tool_call_id=tool_call_id,
-                        content=error_msg,
-                        is_error=True,
-                    ))
+                    yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
 
-            # Add tool results as a message for next round and persist
-            tool_result_msg = Message(
-                role=Role.TOOL,
-                content="",
-                tool_results=tool_results_for_msg,
-            )
-            current_messages.append(tool_result_msg)
-            await mgr.add_message(session_id, tool_result_msg)
+                full_content += round_content
+                full_thinking += round_thinking
 
-            # Signal UI that model is processing tool results
-            yield f"data: {json.dumps({'type': 'processing'})}\n\n"
+                # If no tool calls, we're done
+                if not round_tool_calls:
+                    break
 
-        # Store final assistant response (the text reply, not tool-call rounds)
-        if full_content or full_thinking:
-            assistant_msg = Message(
-                role=Role.ASSISTANT,
-                content=full_content,
-                thinking=full_thinking or None,
-                metadata={"model": model, "provider": provider_name},
-            )
-            await mgr.add_message(session_id, assistant_msg)
+                # Execute each tool call
+                # First, add assistant message with tool calls to context and persist it
+                assistant_tc_msg = Message(
+                    role=Role.ASSISTANT,
+                    content=round_content,
+                    tool_calls=[
+                        ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
+                        for tc in round_tool_calls
+                    ],
+                )
+                current_messages.append(assistant_tc_msg)
+                await mgr.add_message(session_id, assistant_tc_msg)
 
-        # Log token usage
-        input_tokens = stream_meta.get("input_tokens", 0)
-        output_tokens = stream_meta.get("output_tokens", 0)
-        if not input_tokens:
-            input_tokens = provider.count_tokens(" ".join(m.content for m in messages), model)
-        if not output_tokens:
-            output_tokens = provider.count_tokens(full_content, model)
-        cost = stream_meta.get("cost_usd", estimate_cost(model, input_tokens, output_tokens))
-        await mgr.log_usage(session_id, model, input_tokens, output_tokens, cost)
+                tool_results_for_msg: list[ToolResult] = []
+                for tc in round_tool_calls:
+                    tool_name = tc["name"]
+                    tool_args = tc["arguments"]
+                    tool_call_id = tc["id"]
 
-        # Send final DONE with token/cost metadata
-        yield f"data: {json.dumps({'type': 'done', 'content': '', 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost_usd': cost, 'model': model})}\n\n"
+                    # Execute the tool
+                    try:
+                        tool_impl = Registry.get_tool(tool_name)
+                        result = await tool_impl.execute(tool_args, work_dir=WORK_DIR)
+
+                        # Emit tool_complete event
+                        yield f"data: {json.dumps({'type': 'tool_complete', 'tool_call_id': tool_call_id, 'name': tool_name, 'result': result.content, 'is_error': result.is_error})}\n\n"
+
+                        tool_results_for_msg.append(ToolResult(
+                            tool_call_id=tool_call_id,
+                            content=result.content,
+                            is_error=result.is_error,
+                        ))
+                    except Exception as e:
+                        error_msg = f"Tool '{tool_name}' failed: {str(e)}"
+                        yield f"data: {json.dumps({'type': 'tool_complete', 'tool_call_id': tool_call_id, 'name': tool_name, 'result': error_msg, 'is_error': True})}\n\n"
+                        tool_results_for_msg.append(ToolResult(
+                            tool_call_id=tool_call_id,
+                            content=error_msg,
+                            is_error=True,
+                        ))
+
+                # Add tool results as a message for next round and persist
+                tool_result_msg = Message(
+                    role=Role.TOOL,
+                    content="",
+                    tool_results=tool_results_for_msg,
+                )
+                current_messages.append(tool_result_msg)
+                await mgr.add_message(session_id, tool_result_msg)
+
+                # Signal UI that model is processing tool results
+                yield f"data: {json.dumps({'type': 'processing'})}\n\n"
+
+            # Store final assistant response (the text reply, not tool-call rounds)
+            if full_content or full_thinking:
+                assistant_msg = Message(
+                    role=Role.ASSISTANT,
+                    content=full_content,
+                    thinking=full_thinking or None,
+                    metadata={"model": model, "provider": provider_name},
+                )
+                await mgr.add_message(session_id, assistant_msg)
+
+            # Log token usage
+            input_tokens = stream_meta.get("input_tokens", 0)
+            output_tokens = stream_meta.get("output_tokens", 0)
+            if not input_tokens:
+                input_tokens = provider.count_tokens(" ".join(m.content for m in messages), model)
+            if not output_tokens:
+                output_tokens = provider.count_tokens(full_content, model)
+            cost = stream_meta.get("cost_usd", estimate_cost(model, input_tokens, output_tokens))
+            await mgr.log_usage(session_id, model, input_tokens, output_tokens, cost)
+
+            # Send final DONE with token/cost metadata
+            yield f"data: {json.dumps({'type': 'done', 'content': '', 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost_usd': cost, 'model': model})}\n\n"
+
+        finally:
+            # Mark agent as completed
+            if session_id in _active_agents:
+                _active_agents[session_id]["status"] = "done"
+                _active_agents[session_id]["end_time"] = time.time()
 
     return StreamingResponse(
         generate(),
@@ -360,6 +398,35 @@ async def chat_stream(request: Request):
 
 
 # ── Session API ──────────────────────────────────────────────────────
+
+@app.get("/api/agents")
+async def list_agents():
+    """Return active and recently completed agent sessions."""
+    now = time.time()
+    # Clean up old completed agents (keep last 30 minutes)
+    stale = [k for k, v in _active_agents.items() if v["status"] == "done" and now - v.get("end_time", now) > 1800]
+    for k in stale:
+        del _active_agents[k]
+
+    agents = []
+    for sid, info in _active_agents.items():
+        elapsed = now - info["start_time"]
+        agents.append({
+            "session_id": sid,
+            "title": info.get("title", ""),
+            "provider": info["provider"],
+            "model": info["model"],
+            "mode": info["mode"],
+            "status": info["status"],
+            "elapsed": round(elapsed, 1),
+            "tool_count": info["tool_count"],
+            "start_time": info["start_time"],
+            "end_time": info.get("end_time"),
+        })
+    # Sort: running first, then by start_time desc
+    agents.sort(key=lambda a: (0 if a["status"] == "running" else 1, -a["start_time"]))
+    return JSONResponse(agents)
+
 
 @app.get("/api/sessions")
 async def list_sessions():

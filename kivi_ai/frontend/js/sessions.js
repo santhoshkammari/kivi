@@ -31,6 +31,7 @@ function _saveSessionMode(id, mode) {
 function newChat() {
   document.getElementById('gitDashboard').style.display = 'none';
   document.getElementById('tokenDashboard').style.display = 'none';
+  document.getElementById('agentsDashboard').style.display = 'none';
   document.getElementById('messagesArea').style.display = '';
   currentSessionId = null;
   currentMessages = [];
@@ -82,6 +83,7 @@ async function createSession(firstMessage) {
 async function switchToChat(id) {
   document.getElementById('gitDashboard').style.display = 'none';
   document.getElementById('tokenDashboard').style.display = 'none';
+  document.getElementById('agentsDashboard').style.display = 'none';
   const chatsDash = document.getElementById('chatsDashboard');
   if (chatsDash) chatsDash.style.display = 'none';
   document.getElementById('messagesArea').style.display = '';

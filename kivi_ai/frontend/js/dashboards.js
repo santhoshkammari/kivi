@@ -11,6 +11,7 @@ function showGitDashboard() {
   document.getElementById('chatHeader').style.display = 'none';
   document.getElementById('tokenDashboard').style.display = 'none';
   document.getElementById('chatsDashboard').style.display = 'none';
+  document.getElementById('agentsDashboard').style.display = 'none';
   document.getElementById('gitDashboard').style.display = 'flex';
   renderGitRecents();
 }
@@ -32,6 +33,7 @@ function showTokenDashboard() {
   document.getElementById('chatHeader').style.display = 'none';
   document.getElementById('gitDashboard').style.display = 'none';
   document.getElementById('chatsDashboard').style.display = 'none';
+  document.getElementById('agentsDashboard').style.display = 'none';
   document.getElementById('tokenDashboard').style.display = 'flex';
   loadTokenStats();
 }
@@ -268,6 +270,7 @@ function showChatsDashboard() {
   document.getElementById('gitDashboard').style.display = 'none';
   document.getElementById('tokenDashboard').style.display = 'none';
   document.getElementById('chatsDashboard').style.display = 'none';
+  document.getElementById('agentsDashboard').style.display = 'none';
   document.getElementById('messagesArea').style.display = '';
   if (currentSessionId) {
     switchToChat(currentSessionId);
