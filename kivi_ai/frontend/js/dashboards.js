@@ -4,21 +4,14 @@ let _gitRecentPaths = JSON.parse(localStorage.getItem('git_recent_paths') || '[]
 let _gitSearchTimer = null;
 
 function showGitDashboard() {
-  document.getElementById('welcomeScreen').classList.add('hidden');
+  hideAllPanels();
   document.getElementById('messagesArea').classList.remove('active');
-  document.getElementById('messagesArea').style.display = 'none';
-  document.getElementById('chatInputArea').style.display = 'none';
-  document.getElementById('chatHeader').style.display = 'none';
-  document.getElementById('tokenDashboard').style.display = 'none';
-  document.getElementById('chatsDashboard').style.display = 'none';
-  document.getElementById('agentsDashboard').style.display = 'none';
   document.getElementById('gitDashboard').style.display = 'flex';
   renderGitRecents();
 }
 
 function hideGitDashboard() {
   document.getElementById('gitDashboard').style.display = 'none';
-  document.getElementById('messagesArea').style.display = '';
 }
 
 // ===== TOKEN BURNING DASHBOARD =====
@@ -26,21 +19,14 @@ let _tokenStats = null;
 let _tokenPeriod = 'today';
 
 function showTokenDashboard() {
-  document.getElementById('welcomeScreen').classList.add('hidden');
+  hideAllPanels();
   document.getElementById('messagesArea').classList.remove('active');
-  document.getElementById('messagesArea').style.display = 'none';
-  document.getElementById('chatInputArea').style.display = 'none';
-  document.getElementById('chatHeader').style.display = 'none';
-  document.getElementById('gitDashboard').style.display = 'none';
-  document.getElementById('chatsDashboard').style.display = 'none';
-  document.getElementById('agentsDashboard').style.display = 'none';
   document.getElementById('tokenDashboard').style.display = 'flex';
   loadTokenStats();
 }
 
 function hideTokenDashboard() {
   document.getElementById('tokenDashboard').style.display = 'none';
-  document.getElementById('messagesArea').style.display = '';
 }
 
 function setTokenPeriod(p) {
@@ -267,11 +253,6 @@ function formatTokenCount(n) {
 
 // ── Chats Dashboard ──
 function showChatsDashboard() {
-  document.getElementById('gitDashboard').style.display = 'none';
-  document.getElementById('tokenDashboard').style.display = 'none';
-  document.getElementById('chatsDashboard').style.display = 'none';
-  document.getElementById('agentsDashboard').style.display = 'none';
-  document.getElementById('messagesArea').style.display = '';
   if (currentSessionId) {
     switchToChat(currentSessionId);
   } else {

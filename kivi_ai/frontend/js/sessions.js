@@ -29,9 +29,7 @@ function _saveSessionMode(id, mode) {
 }
 
 function newChat() {
-  document.getElementById('gitDashboard').style.display = 'none';
-  document.getElementById('tokenDashboard').style.display = 'none';
-  document.getElementById('agentsDashboard').style.display = 'none';
+  hideAllPanels();
   document.getElementById('messagesArea').style.display = '';
   currentSessionId = null;
   currentMessages = [];
@@ -81,12 +79,7 @@ async function createSession(firstMessage) {
 }
 
 async function switchToChat(id) {
-  document.getElementById('gitDashboard').style.display = 'none';
-  document.getElementById('tokenDashboard').style.display = 'none';
-  document.getElementById('agentsDashboard').style.display = 'none';
-  const chatsDash = document.getElementById('chatsDashboard');
-  if (chatsDash) chatsDash.style.display = 'none';
-  document.getElementById('messagesArea').style.display = '';
+  hideAllPanels();
 
   currentSessionId = id;
   isStreaming = false;
@@ -104,6 +97,7 @@ async function switchToChat(id) {
 
   // Update UI
   document.getElementById('welcomeScreen').classList.add('hidden');
+  document.getElementById('messagesArea').style.display = '';
   document.getElementById('messagesArea').classList.add('active');
   document.getElementById('chatInputArea').style.display = '';
   document.getElementById('chatHeader').style.display = '';

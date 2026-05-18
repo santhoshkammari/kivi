@@ -673,6 +673,16 @@ async def git_push(request: Request):
 # ── Serve frontend ───────────────────────────────────────────────────
 
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class NoCacheStaticMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+app.add_middleware(NoCacheStaticMiddleware)
 
 _frontend_dir = Path(__file__).parent / "frontend"
 app.mount("/static/css", StaticFiles(directory=str(_frontend_dir / "css")), name="static-css")

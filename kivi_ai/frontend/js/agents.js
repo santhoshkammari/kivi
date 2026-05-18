@@ -4,24 +4,14 @@ let _agentsData = [];
 let _agentsPollInterval = null;
 
 function showAgentsDashboard() {
-  document.getElementById('gitDashboard').style.display = 'none';
-  document.getElementById('tokenDashboard').style.display = 'none';
-  document.getElementById('chatsDashboard').style.display = 'none';
-  document.getElementById('messagesArea').style.display = 'none';
-  document.getElementById('welcomeScreen').classList.add('hidden');
-  document.getElementById('chatInputArea').style.display = 'none';
-  document.getElementById('chatHeader').style.display = 'none';
+  hideAllPanels();
   document.getElementById('agentsDashboard').style.display = '';
   refreshAgents();
-  // Poll while dashboard is visible
   _startAgentsPoll();
 }
 
 function hideAgentsDashboard() {
   document.getElementById('agentsDashboard').style.display = 'none';
-  document.getElementById('messagesArea').style.display = '';
-  document.getElementById('chatInputArea').style.display = '';
-  document.getElementById('chatHeader').style.display = '';
   _stopAgentsPoll();
 }
 

@@ -1,6 +1,20 @@
 // ===== UI HELPERS =====
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('collapsed'); }
 
+// Centralized panel visibility management
+function hideAllPanels() {
+  document.getElementById('gitDashboard').style.display = 'none';
+  document.getElementById('tokenDashboard').style.display = 'none';
+  const chatsDash = document.getElementById('chatsDashboard');
+  if (chatsDash) chatsDash.style.display = 'none';
+  document.getElementById('agentsDashboard').style.display = 'none';
+  document.getElementById('messagesArea').style.display = 'none';
+  document.getElementById('chatInputArea').style.display = 'none';
+  document.getElementById('chatHeader').style.display = 'none';
+  document.getElementById('welcomeScreen').classList.add('hidden');
+  if (typeof _stopAgentsPoll === 'function') _stopAgentsPoll();
+}
+
 function toggleCollapse(header) {
   header.classList.toggle('collapsed');
   header.nextElementSibling.classList.toggle('collapsed');
